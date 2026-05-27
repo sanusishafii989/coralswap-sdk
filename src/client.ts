@@ -36,8 +36,9 @@ export class CoralSwapClient {
   network: Network;
   config: CoralSwapConfig;
   networkConfig: NetworkConfig;
-  server: SorobanRpc.Server;
-
+  private _server: SorobanRpc.Server;
+  private _rpcUrls: string[] = [];
+  private _currentRpcIndex: number = 0;
   private signer: Signer | null = null;
   private _publicKeyCache: string | null = null;
   private _factory: FactoryClient | null = null;
@@ -47,20 +48,84 @@ export class CoralSwapClient {
   private readonly logger?: Logger;
 
   /**
-   * Helper to execute an async RPC function with exponential backoff retry.
+   * Helper to execute an async RPC function with exponential backoff retry
+   * and automatic fallback to alternative RPC endpoints if configured.
    *
-   * @param fn - The async function to execute
+   * @param fn - The async function to execute. Receives the current server instance.
    * @param label - A label for logging purposes
    * @returns The result of the function
    * @private
    */
-  private async withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  private async executeWithFallback<T>(
+    fn: (server: SorobanRpc.Server) => Promise<T>,
+    label: string,
+  ): Promise<T> {
     const options: RetryOptions = {
       maxRetries: this.config.maxRetries ?? DEFAULTS.maxRetries,
       retryDelayMs: this.config.retryDelayMs ?? DEFAULTS.retryDelayMs,
       maxRetryDelayMs: this.config.maxRetryDelayMs ?? DEFAULTS.maxRetryDelayMs,
     };
-    return withRetry(fn, options, this.logger, label);
+
+    let lastError: any;
+    const initialIndex = this._currentRpcIndex;
+
+    // We try each RPC URL at least once if needed
+    for (let i = 0; i < this._rpcUrls.length; i++) {
+      try {
+        return await withRetry(
+          () => fn(this.server),
+          options,
+          this.logger,
+          `${label}[RPC:${this._currentRpcIndex}]`,
+        );
+      } catch (err) {
+        lastError = err;
+        this.logger?.info(`executeWithFallback: RPC call failed, trying fallback`, {
+          label,
+          url: this._rpcUrls[this._currentRpcIndex],
+          error: err instanceof Error ? err.message : err,
+        });
+
+        if (this._rpcUrls.length > 1) {
+          this.rotateRpcServer();
+          // If we've circled back to the initial index, we've tried all URLs
+          if (this._currentRpcIndex === initialIndex) break;
+        } else {
+          break;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Get the current Soroban RPC server instance.
+   */
+  get server(): SorobanRpc.Server {
+    return this._server;
+  }
+
+  /**
+   * Rotate to the next available RPC server in the fallback list.
+   * @private
+   */
+  private rotateRpcServer(): void {
+    if (this._rpcUrls.length <= 1) return;
+    this._currentRpcIndex = (this._currentRpcIndex + 1) % this._rpcUrls.length;
+    this._server = this.createRpcServer(this._rpcUrls[this._currentRpcIndex]);
+  }
+
+  /**
+   * Create a new SorobanRpc.Server instance with custom options.
+   * @private
+   */
+  private createRpcServer(url: string): SorobanRpc.Server {
+    const options: any = {
+      headers: this.config.rpcHeaders,
+      ...this.config.fetchOptions,
+    };
+    return new SorobanRpc.Server(url, options);
   }
 
   /**
@@ -87,10 +152,17 @@ export class CoralSwapClient {
     this.network = config.network;
     this.networkConfig = {
       ...NETWORK_CONFIGS[config.network],
-      ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
     };
 
-    this.server = new SorobanRpc.Server(this.networkConfig.rpcUrl);
+    // Handle custom RPC URL(s)
+    if (config.rpcUrl) {
+      this._rpcUrls = Array.isArray(config.rpcUrl) ? config.rpcUrl : [config.rpcUrl];
+    } else {
+      this._rpcUrls = [this.networkConfig.rpcUrl];
+    }
+
+    this._currentRpcIndex = 0;
+    this._server = this.createRpcServer(this._rpcUrls[0]);
 
     if (config.signer) {
       this.signer = config.signer;
@@ -111,6 +183,10 @@ export class CoralSwapClient {
    */
   poller(): TransactionPoller {
     if (!this._poller) {
+      // Use a proxy or wrapper if we want the poller to always use the current server
+      // For now, we'll just ensure it's re-created or updated if needed.
+      // But actually, TransactionPoller is created once.
+      // I'll modify TransactionPoller to accept the client or a server provider.
       this._poller = new TransactionPoller(this.server, this.logger);
     }
     return this._poller;
@@ -157,7 +233,7 @@ export class CoralSwapClient {
       }
       this._factory = new FactoryClient(
         this.networkConfig.factoryAddress,
-        this.networkConfig.rpcUrl,
+        this.server,
         this.networkConfig.networkPassphrase,
         this.getRetryOptions(),
         this.logger,
@@ -176,7 +252,7 @@ export class CoralSwapClient {
       }
       this._router = new RouterClient(
         this.networkConfig.routerAddress,
-        this.networkConfig.rpcUrl,
+        this.server,
         this.networkConfig.networkPassphrase,
         this.getRetryOptions(),
         this.logger,
@@ -192,7 +268,7 @@ export class CoralSwapClient {
     const sourceAccount = this._publicKeyCache ?? this.config.publicKey;
     return new PairClient(
       pairAddress,
-      this.networkConfig.rpcUrl,
+      this.server,
       this.networkConfig.networkPassphrase,
       this.getRetryOptions(),
       this.logger,
@@ -212,10 +288,16 @@ export class CoralSwapClient {
     this.network = network;
     this.networkConfig = {
       ...NETWORK_CONFIGS[network],
-      ...(rpcUrl ? { rpcUrl } : {}),
     };
 
-    this.server = new SorobanRpc.Server(this.networkConfig.rpcUrl);
+    if (rpcUrl) {
+      this._rpcUrls = Array.isArray(rpcUrl) ? rpcUrl : [rpcUrl];
+    } else {
+      this._rpcUrls = [this.networkConfig.rpcUrl];
+    }
+
+    this._currentRpcIndex = 0;
+    this._server = this.createRpcServer(this._rpcUrls[0]);
 
     // Reset contract client singletons to trigger re-initialization
     this._factory = null;
@@ -238,7 +320,7 @@ export class CoralSwapClient {
 
     this.logger?.info("setNetwork: network switched", {
       network: this.network,
-      rpcUrl: this.networkConfig.rpcUrl,
+      rpcUrl: (this.networkConfig as any).rpcUrl,
     });
   }
 
@@ -248,7 +330,7 @@ export class CoralSwapClient {
   lpToken(lpTokenAddress: string): LPTokenClient {
     return new LPTokenClient(
       lpTokenAddress,
-      this.networkConfig.rpcUrl,
+      this.server,
       this.networkConfig.networkPassphrase,
       this.getRetryOptions(),
       this.logger,
@@ -296,8 +378,8 @@ export class CoralSwapClient {
       const sourceKey = source ?? (await this.resolvePublicKey());
 
       this.logger?.debug("getAccount: fetching account", { sourceKey });
-      const account = await this.withRetry(
-        () => this.server.getAccount(sourceKey),
+      const account = await this.executeWithFallback(
+        (server) => server.getAccount(sourceKey),
         "getAccount",
       );
       this.logger?.debug("getAccount: success", { sourceKey });
@@ -317,8 +399,8 @@ export class CoralSwapClient {
         sourceKey,
         operationCount: operations.length,
       });
-      const sim = await this.withRetry(
-        () => this.server.simulateTransaction(tx),
+      const sim = await this.executeWithFallback(
+        (server) => server.simulateTransaction(tx),
         "simulateTransaction",
       );
       if (!SorobanRpc.Api.isSimulationSuccess(sim)) {
@@ -355,8 +437,8 @@ export class CoralSwapClient {
         this.networkConfig.networkPassphrase,
       );
 
-      const response = await this.withRetry(
-        () => this.server.sendTransaction(signedTx),
+      const response = await this.executeWithFallback(
+        (server) => server.sendTransaction(signedTx),
         "sendTransaction",
       );
 
@@ -543,8 +625,8 @@ export class CoralSwapClient {
    */
   async isHealthy(): Promise<boolean> {
     try {
-      const health = await this.withRetry(
-        () => this.server.getHealth(),
+      const health = await this.executeWithFallback(
+        (server) => server.getHealth(),
         "getHealth",
       );
       return health.status === "healthy";
@@ -557,8 +639,8 @@ export class CoralSwapClient {
    * Get the current ledger number from the RPC.
    */
   async getCurrentLedger(): Promise<number> {
-    const info = await this.withRetry(
-      () => this.server.getLatestLedger(),
+    const info = await this.executeWithFallback(
+      (server) => server.getLatestLedger(),
       "getLatestLedger",
     );
     return info.sequence;

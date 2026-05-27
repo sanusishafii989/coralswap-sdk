@@ -1,4 +1,5 @@
 import { CoralSwapClient } from "@/client";
+import { DEFAULTS } from "@/config";
 import {
   FlashLoanRequest,
   FlashLoanResult,
@@ -83,7 +84,7 @@ export class FlashLoanModule {
       amount,
       feeBps: config.flashFeeBps,
       feeAmount: actualFee,
-      feeFloor: config.flashFeeFloor,
+      feeFloor: DEFAULTS.flashFeeFloorBps,
     };
   }
 
@@ -125,7 +126,7 @@ export class FlashLoanModule {
     if (!validateFeeFloor(config.flashFeeBps, feeFloorBps)) {
       throw new FlashLoanError("Flash loan fee below protocol floor", {
         feeBps: config.flashFeeBps,
-        feeFloor: config.flashFeeFloor,
+        feeFloor: DEFAULTS.flashFeeFloorBps,
       });
     }
 

@@ -97,7 +97,7 @@ export class PairClient {
    */
   constructor(
     contractAddress: string,
-    rpcUrl: string,
+    server: SorobanRpc.Server,
     networkPassphrase: string,
     retryOptions: RetryOptions,
     logger?: Logger,
@@ -105,7 +105,7 @@ export class PairClient {
   ) {
     this.address = contractAddress;
     this.contract = new Contract(contractAddress);
-    this.server = new SorobanRpc.Server(rpcUrl);
+    this.server = server;
     this.networkPassphrase = networkPassphrase;
     this.retryOptions = retryOptions;
     this.logger = logger;

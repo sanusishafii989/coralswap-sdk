@@ -18,8 +18,12 @@ export interface NetworkConfig {
 export interface CoralSwapConfig {
   /** The Soroban network to connect to */
   network: Network;
-  /** Optional custom RPC URL to use */
-  rpcUrl?: string;
+  /** Optional custom RPC URL(s) to use. Can be a single string or an array of fallback URLs. */
+  rpcUrl?: string | string[];
+  /** Optional custom headers to include in all RPC requests (e.g. for authentication) */
+  rpcHeaders?: Record<string, string>;
+  /** Optional custom fetch options for the underlying RPC client */
+  fetchOptions?: any;
   /** Optional secret key for signing transactions */
   secretKey?: string;
   /** Optional public key for the account */
@@ -34,7 +38,7 @@ export interface CoralSwapConfig {
   defaultDeadlineSec?: number;
   /** Maximum number of retry attempts for failed RPC calls */
   maxRetries?: number;
-  /** Delay in milliseconds between retry attempts */
+  /** Maximum delay between retry attempts */
   retryDelayMs?: number;
   /** Maximum delay in milliseconds between retry attempts */
   maxRetryDelayMs?: number;

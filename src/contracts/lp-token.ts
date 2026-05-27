@@ -34,14 +34,14 @@ export class LPTokenClient {
    */
   constructor(
     contractAddress: string,
-    rpcUrl: string,
+    server: SorobanRpc.Server,
     networkPassphrase: string,
     retryOptions: RetryOptions,
     logger?: Logger,
   ) {
     this.address = contractAddress;
     this.contract = new Contract(contractAddress);
-    this.server = new SorobanRpc.Server(rpcUrl);
+    this.server = server;
     this.networkPassphrase = networkPassphrase;
     this.retryOptions = retryOptions;
     this.logger = logger;
