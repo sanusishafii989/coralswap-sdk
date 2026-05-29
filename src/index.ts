@@ -35,6 +35,9 @@ export {
   CoralSwapConfig,
   NetworkConfig,
   NETWORK_CONFIGS,
+  TESTNET_NETWORK,
+  MAINNET_NETWORK,
+  STAGING_NETWORK,
   DEFAULTS,
   DEFAULT_SLIPPAGE,
   PRECISION,
@@ -99,6 +102,7 @@ export {
   exceedsBudget,
   decodeDiagnosticEvents,
   buildSimulationResult,
+  estimateGas,
   withRetry,
   isRetryable,
   sleep,
@@ -107,7 +111,6 @@ export {
   validateNonNegativeAmount,
   validateSlippage,
   validateDistinctTokens,
-
   isValidPath,
   EventParser,
   EVENT_TOPICS,
@@ -122,6 +125,7 @@ export type {
   SimulationResourceEstimate,
   WaitNextLedgerOptions,
   DecodeEventsOptions,
+  SimulateFn,
 } from "./utils";
 
 // Errors

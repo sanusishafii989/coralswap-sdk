@@ -6,6 +6,7 @@ import {
   AddLiquidityQuote,
 } from "@/types/liquidity";
 import { LPPosition } from "@/types/pool";
+import { GasEstimate } from "@/types/gas";
 import { PRECISION } from "@/config";
 import { TransactionError, ValidationError } from "@/errors";
 import {
@@ -14,6 +15,7 @@ import {
   validateNonNegativeAmount,
   validateDistinctTokens,
 } from "@/utils/validation";
+import { estimateGas } from "@/utils/gas";
 
 /**
  * Liquidity module -- manages LP positions in CoralSwap pools.
@@ -98,18 +100,23 @@ export class LiquidityModule {
   }
 
   /**
-   * Execute an add-liquidity transaction via the Router.
+   * Execute an add-liquidity transaction via the Router, or estimate its fee.
+   *
+   * Pass `{ estimateOnly: true }` to dry-run the simulation and return a
+   * {@link GasEstimate} without submitting.
    *
    * @param request - Parameters for adding liquidity
-   * @returns The execution result containing the transaction hash and added amounts
+   * @param options.estimateOnly - When true, returns a fee estimate instead of submitting
+   * @returns The execution result, or a GasEstimate when estimateOnly is true
    * @throws {ValidationError} If minimum amounts exceed desired amounts or inputs are invalid
    * @throws {TransactionError} If the transaction execution fails
    * @example
-   * const result = await client.liquidity.addLiquidity({
-   *   tokenA: 'C...', tokenB: 'C...', amountADesired: 100n, amountBDesired: 100n, amountAMin: 99n, amountBMin: 99n, to: 'C...'
-   * });
+   * const result = await client.liquidity.addLiquidity({ tokenA: 'C...', ... });
+   * const gas = await client.liquidity.addLiquidity({ tokenA: 'C...', ... }, { estimateOnly: true });
    */
-  async addLiquidity(request: AddLiquidityRequest): Promise<LiquidityResult> {
+  async addLiquidity(request: AddLiquidityRequest, options: { estimateOnly: true }): Promise<GasEstimate>;
+  async addLiquidity(request: AddLiquidityRequest, options?: { estimateOnly?: false }): Promise<LiquidityResult>;
+  async addLiquidity(request: AddLiquidityRequest, options?: { estimateOnly?: boolean }): Promise<LiquidityResult | GasEstimate> {
     validateAddress(request.tokenA, "tokenA");
     validateAddress(request.tokenB, "tokenB");
     validateDistinctTokens(request.tokenA, request.tokenB);
@@ -144,6 +151,10 @@ export class LiquidityModule {
       deadline,
     );
 
+    if (options?.estimateOnly) {
+      return estimateGas((ops) => this.client.simulateTransaction(ops, {}), [op]);
+    }
+
     const result = await this.client.submitTransaction([op]);
 
     if (!result.success) {
@@ -163,19 +174,25 @@ export class LiquidityModule {
   }
 
   /**
-   * Execute a remove-liquidity transaction via the Router.
+   * Execute a remove-liquidity transaction via the Router, or estimate its fee.
+   *
+   * Pass `{ estimateOnly: true }` to dry-run the simulation and return a
+   * {@link GasEstimate} without submitting.
    *
    * @param request - Parameters for removing liquidity
-   * @returns The execution result containing the withdrawn token amounts
+   * @param options.estimateOnly - When true, returns a fee estimate instead of submitting
+   * @returns The execution result, or a GasEstimate when estimateOnly is true
    * @throws {TransactionError} If the transaction execution fails
    * @example
-   * const result = await client.liquidity.removeLiquidity({
-   *   tokenA: 'C...', tokenB: 'C...', liquidity: 50n, amountAMin: 49n, amountBMin: 49n, to: 'C...'
-   * });
+   * const result = await client.liquidity.removeLiquidity({ tokenA: 'C...', ... });
+   * const gas = await client.liquidity.removeLiquidity({ tokenA: 'C...', ... }, { estimateOnly: true });
    */
+  async removeLiquidity(request: RemoveLiquidityRequest, options: { estimateOnly: true }): Promise<GasEstimate>;
+  async removeLiquidity(request: RemoveLiquidityRequest, options?: { estimateOnly?: false }): Promise<LiquidityResult>;
   async removeLiquidity(
     request: RemoveLiquidityRequest,
-  ): Promise<LiquidityResult> {
+    options?: { estimateOnly?: boolean },
+  ): Promise<LiquidityResult | GasEstimate> {
     validateAddress(request.tokenA, "tokenA");
     validateAddress(request.tokenB, "tokenB");
     validateDistinctTokens(request.tokenA, request.tokenB);
@@ -195,6 +212,10 @@ export class LiquidityModule {
       request.amountBMin,
       deadline,
     );
+
+    if (options?.estimateOnly) {
+      return estimateGas((ops) => this.client.simulateTransaction(ops, {}), [op]);
+    }
 
     const result = await this.client.submitTransaction([op]);
 

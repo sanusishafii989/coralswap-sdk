@@ -60,6 +60,9 @@ export {
   isValidPath,
 } from './validation';
 
+export { estimateGas } from './gas';
+export type { SimulateFn } from './gas';
+
 export { waitNextLedger } from './ledger';
 export type { WaitNextLedgerOptions } from './ledger';
 
