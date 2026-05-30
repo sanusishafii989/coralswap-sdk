@@ -156,3 +156,9 @@ export type CoralSwapEvent =
   | SyncEvent
   | FeeUpdateEvent
   | ProposalEvent;
+
+/**
+ * Pool-specific events emitted by pair contracts during trading.
+ * This is a discriminated union of the three core pool event types.
+ */
+export type PoolEvent = SwapEvent | MintEvent | BurnEvent;

@@ -227,6 +227,65 @@ export class EventParser {
   }
 
   /**
+   * Parse a single Soroban event response from `server.getEvents()`.
+   *
+   * This bridges the `EventResponse` format returned by the Soroban RPC
+   * `getEvents` endpoint into the internal parsing logic, reusing the same
+   * ScVal decoders used for transaction-level event parsing.
+   *
+   * @param event - A single event from `GetEventsResponse.events`.
+   * @returns A typed `CoralSwapEvent`, or `null` if the event is not a
+   *   recognised CoralSwap event or is filtered out by contract filter.
+   */
+  fromEventResponse(
+    event: SorobanRpc.Api.EventResponse,
+  ): CoralSwapEvent | null {
+    if (!event.inSuccessfulContractCall) return null;
+
+    const contractId = event.contractId?.toString() ?? '';
+
+    if (this.contractIds.size > 0 && !this.contractIds.has(contractId)) {
+      return null;
+    }
+
+    if (event.topic.length === 0) return null;
+
+    const topicName = decodeString(event.topic[0]);
+    if (!KNOWN_TOPICS.has(topicName)) return null;
+
+    const base: Omit<ContractEvent, 'type'> = {
+      contractId,
+      ledger: event.ledger,
+      timestamp: event.ledger,
+      txHash: event.txHash,
+    };
+
+    switch (topicName) {
+      case EVENT_TOPICS.SWAP:
+        return this.parseSwap(event.value, base);
+      case EVENT_TOPICS.MINT:
+        return this.parseMint(event.value, base);
+      case EVENT_TOPICS.BURN:
+        return this.parseBurn(event.value, base);
+      case EVENT_TOPICS.ADD_LIQUIDITY:
+      case EVENT_TOPICS.REMOVE_LIQUIDITY:
+        return this.parseLiquidity(
+          event.value,
+          base,
+          topicName as 'add_liquidity' | 'remove_liquidity',
+        );
+      case EVENT_TOPICS.FLASH_LOAN:
+        return this.parseFlashLoan(event.value, base);
+      case EVENT_TOPICS.SYNC:
+        return this.parseSync(event.value, base);
+      case EVENT_TOPICS.FEE_UPDATE:
+        return this.parseFeeUpdate(event.value, base);
+      default:
+        return null;
+    }
+  }
+
+  /**
    * Extract and parse events from a successful Soroban transaction response.
    *
    * @param response - A successful transaction response from Soroban RPC.
