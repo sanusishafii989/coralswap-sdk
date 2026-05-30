@@ -180,3 +180,58 @@ function normalizeRetryConfig(options: RetryOptions): RetryConfig {
 }
 
 
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: RetryOptions,
+  logger?: Logger,
+  label: string = "RPC",
+): Promise<T> {
+  const config = normalizeRetryConfig(options);
+  const breaker = getCircuitBreaker(label, config.circuitBreaker);
+
+  const breakerStateAtStart = breaker.getState();
+  const maxRetries = breakerStateAtStart === "half-open" ? 0 : config.maxRetries;
+
+  breaker.beforeRequest();
+  let lastError: any;
+
+  try {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (typeof options.deadlineMs === "number" && Date.now() >= options.deadlineMs) {
+        throw new DeadlineError(options.deadlineMs);
+      }
+      try {
+        const result = await fn();
+        breaker.onSuccess();
+        return result;
+      } catch (err: any) {
+        lastError = err;
+
+        const retryable = isRetryable(err);
+        if (!retryable || attempt === maxRetries) {
+          throw err;
+        }
+
+        const rawBackoff =
+          config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt);
+        const backoff = Math.min(config.maxDelayMs, rawBackoff);
+        const jitter = backoff * 0.15 * (Math.random() * 2 - 1);
+        const delay = Math.min(config.maxDelayMs, Math.max(0, backoff + jitter));
+
+        logger?.debug(`${label}: retrying after ${Math.round(delay)}ms`, {
+          attempt: attempt + 1,
+          maxRetries,
+          error: err.message,
+        });
+
+        await sleep(delay);
+      }
+    }
+  } catch (err: any) {
+    breaker.onFailure();
+    throw err;
+  }
+
+  breaker.onFailure();
+  throw lastError;
+}
