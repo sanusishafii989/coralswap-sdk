@@ -65,9 +65,22 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
+  PriceFeedModule,
+  SupportedAsset,
+  BlendModule,
+  AnalyticsModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult } from "@/modules";
+export type { PriceFeed } from "@/modules";
+export type {
+  BlendMarket,
+  BorrowCapacity,
+  CollateralPosition,
+  BorrowPosition,
+  BlendPortfolio,
+} from "@/modules";
+export type { PoolStats } from "@/modules";
 
 // Utilities
 export {
