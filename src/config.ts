@@ -84,7 +84,6 @@ export const DEFAULTS = {
   deadlineSec: 1200,
   maxRetries: 3,
   retryDelayMs: 1000,
-  maxRetryDelayMs: 10000,
   maxRetryDelayMs: 30_000,
   pollingStrategy: PollingStrategy.LINEAR,
   pollingIntervalMs: 1000,
