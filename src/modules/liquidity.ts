@@ -299,3 +299,52 @@ export class LiquidityModule {
     return x;
   }
 }
+
+/**
+ * Impermanent Loss Result
+ */
+export interface ILResult {
+  ilPct: number;
+  valueWithLP: number;
+  valueWithoutLP: number;
+  priceRatio: number;
+}
+
+/**
+ * Calculate Impermanent Loss (IL) for a liquidity position.
+ *
+ * IL formula:
+ * IL = 2 * sqrt(priceRatio) / (1 + priceRatio) - 1
+ *
+ * @param entryPrice - Initial price when liquidity was added
+ * @param currentPrice - Current market price
+ * @returns ILResult
+ *
+ * @throws {ValidationError} If price inputs are invalid
+ */
+export function calculateIL(
+  entryPrice: number,
+  currentPrice: number,
+    ): ILResult {
+  if (entryPrice <= 0 || currentPrice <= 0) {
+    throw new ValidationError('Prices must be greater than zero', {
+      entryPrice,
+      currentPrice,
+    });
+  }
+
+  const priceRatio = currentPrice / entryPrice;
+
+  const il =
+    (2 * Math.sqrt(priceRatio)) / (1 + priceRatio) - 1;
+
+  const valueWithoutLP = priceRatio;
+  const valueWithLP = 2 * Math.sqrt(priceRatio);
+
+  return {
+    ilPct: il * 100,
+    valueWithLP,
+    valueWithoutLP,
+    priceRatio,
+  };
+}
