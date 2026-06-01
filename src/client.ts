@@ -106,6 +106,10 @@ export class CoralSwapClient {
     return this._server;
   }
 
+  set server(server: SorobanRpc.Server) {
+    this._server = server;
+  }
+
   /**
    * Rotate to the next available RPC server in the fallback list.
    * @private
