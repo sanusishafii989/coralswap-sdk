@@ -49,31 +49,40 @@ export interface CoralSwapConfig {
   maxPollingIntervalMs?: number;
 }
 
+/** Network configuration for the Stellar testnet. */
+export const TESTNET_NETWORK: NetworkConfig = {
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  factoryAddress: "",
+  routerAddress: "",
+  sorobanTimeout: 30,
+};
+
+/** Network configuration for the Stellar mainnet. */
+export const MAINNET_NETWORK: NetworkConfig = {
+  rpcUrl: "https://soroban.stellar.org",
+  networkPassphrase: "Public Global Stellar Network ; September 2015",
+  factoryAddress: "",
+  routerAddress: "",
+  sorobanTimeout: 30,
+};
+
+/** Network configuration for the CoralSwap staging environment (runs on testnet RPC). */
+export const STAGING_NETWORK: NetworkConfig = {
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  factoryAddress: "",
+  routerAddress: "",
+  sorobanTimeout: 30,
+};
+
 /**
  * Known contract addresses for each network.
  */
 export const NETWORK_CONFIGS: Record<Network, NetworkConfig> = {
-  [Network.TESTNET]: {
-    rpcUrl: "https://soroban-testnet.stellar.org",
-    networkPassphrase: "Test SDF Network ; September 2015",
-    factoryAddress: "",
-    routerAddress: "",
-    sorobanTimeout: 30,
-  },
-  [Network.MAINNET]: {
-    rpcUrl: "https://soroban.stellar.org",
-    networkPassphrase: "Public Global Stellar Network ; September 2015",
-    factoryAddress: "",
-    routerAddress: "",
-    sorobanTimeout: 30,
-  },
-  [Network.STAGING]: {
-    rpcUrl: "https://soroban-testnet.stellar.org",
-    networkPassphrase: "Test SDF Network ; September 2015",
-    factoryAddress: "",
-    routerAddress: "",
-    sorobanTimeout: 30,
-  },
+  [Network.TESTNET]: TESTNET_NETWORK,
+  [Network.MAINNET]: MAINNET_NETWORK,
+  [Network.STAGING]: STAGING_NETWORK,
 };
 
 /**

@@ -161,24 +161,6 @@ export class FlashLoanError extends CoralSwapSDKError {
 }
 
 /**
- * RWA (Real World Asset) related errors.
- */
-export class RWAError extends CoralSwapSDKError {
-  constructor(code: string, message: string, details?: Record<string, unknown>) {
-    super(code, message, details);
-    this.name = "RWAError";
-  }
-
-  static UnsupportedAsset(asset: string): RWAError {
-    return new RWAError(
-      "RWA_UNSUPPORTED_ASSET",
-      `Unsupported RWA asset: ${asset}`,
-      { asset },
-    );
-  }
-}
-
-/**
  * Circuit breaker triggered (pool is paused).
  */
 export class CircuitBreakerError extends CoralSwapSDKError {
@@ -233,79 +215,52 @@ function mapContractError(
   code: number,
   err: unknown,
 ): CoralSwapSDKError | null {
-  const message = ErrorParser.parseContractError(code);
-
   // Core pair contract errors (100-113)
   switch (code) {
-    case 100: // AlreadyInitialized
-      return new ValidationError(message || "Already initialized", {
-        contractErrorCode: code,
-      });
-    case 101: // ZeroAddress
-      return new ValidationError(message || "Zero address", {
-        contractErrorCode: code,
-      });
-    case 102: // IdenticalTokens
-      return new ValidationError(message || "Identical tokens", {
-        contractErrorCode: code,
-      });
-    case 103: // InsufficientLiquidityMinted
-    case 104: // InsufficientLiquidityBurned
-    case 106: // InsufficientLiquidity
-      return new InsufficientLiquidityError(extractPairAddress(err), {
-        contractErrorCode: code,
-        message,
-      });
-    case 105: // InsufficientOutputAmount
-      return new SlippageError(0n, 0n, 0, {
-        contractErrorCode: code,
-        message,
-      });
-    case 107: // InvalidAmount
-    case 109: // InsufficientInputAmount
-      return new ValidationError(message || "Invalid amount", {
-        contractErrorCode: code,
-      });
-    case 108: // KInvariant
-      return new ValidationError(message || "K invariant violated", {
-        contractErrorCode: code,
-      });
-    case 110: // Locked
-      return new TransactionError(message || "Contract locked", undefined, {
-        contractErrorCode: code,
-      });
-    case 111: // Expired
+    case 100: // Invalid token pair
+      return new ValidationError("Invalid token pair", { contractErrorCode: code });
+    case 101: // Insufficient liquidity
+      return new InsufficientLiquidityError(extractPairAddress(err), { contractErrorCode: code });
+    case 102: // Slippage exceeded
+      return new SlippageError(0n, 0n, 0, { contractErrorCode: code });
+    case 103: // Deadline exceeded
       return new DeadlineError(0);
-    case 112: // ConstraintNotMet
-    case 113: // InvalidFee
-      return new ValidationError(message || "Constraint not met", {
-        contractErrorCode: code,
-      });
+    case 104: // Invalid amount
+      return new ValidationError("Invalid amount", { contractErrorCode: code });
+    case 105: // Insufficient input amount
+      return new ValidationError("Insufficient input amount", { contractErrorCode: code });
+    case 106: // Reentrancy detected
+      return new FlashLoanError("Reentrancy detected", { contractErrorCode: code });
+    case 107: // Flash loan callback failed
+      return new FlashLoanError("Flash loan callback failed", { contractErrorCode: code });
+    case 108: // Flash loan repayment insufficient
+      return new FlashLoanError("Flash loan repayment insufficient", { contractErrorCode: code });
+    case 109: // Circuit breaker
+      return new CircuitBreakerError(extractPairAddress(err));
+    case 110: // Unauthorized
+      return new ValidationError("Unauthorized", { contractErrorCode: code });
+    case 111: // Invalid recipient
+      return new ValidationError("Invalid recipient", { contractErrorCode: code });
+    case 112: // Overflow
+      return new ValidationError("Overflow", { contractErrorCode: code });
+    case 113: // K invariant violated
+      return new ValidationError("K invariant violated", { contractErrorCode: code });
 
-    // Router contract errors (200-series based on parser.ts)
-    case 201: // Invalid swap path
-      return new ValidationError(message || "Invalid swap path", {
-        contractErrorCode: code,
-      });
-    case 202: // Insufficient output amount
-    case 203: // Excessive input amount
-      return new SlippageError(0n, 0n, 0, {
-        contractErrorCode: code,
-        message,
-      });
-    case 204: // Expired deadline
+    // Router contract errors (300-306)
+    case 300: // Pair not found
+      return new PairNotFoundError("unknown", "unknown");
+    case 301: // Invalid path
+      return new ValidationError("Invalid path", { contractErrorCode: code });
+    case 302: // Slippage exceeded
+      return new SlippageError(0n, 0n, 0, { contractErrorCode: code });
+    case 303: // Deadline exceeded
       return new DeadlineError(0);
-    case 205: // Insufficient liquidity
-      return new InsufficientLiquidityError(extractPairAddress(err), {
-        contractErrorCode: code,
-        message,
-      });
-    case 206: // Pair not found
-      return new PairNotFoundError("unknown", "unknown");
-
-    // Handle legacy/alternate codes from existing map if needed
-    case 300:
-      return new PairNotFoundError("unknown", "unknown");
+    case 304: // Insufficient liquidity
+      return new InsufficientLiquidityError(extractPairAddress(err), { contractErrorCode: code });
+    case 305: // Excessive input amount
+      return new ValidationError("Excessive input amount", { contractErrorCode: code });
+    case 306: // Invalid token
+      return new ValidationError("Invalid token", { contractErrorCode: code });
 
     default:
       return null;

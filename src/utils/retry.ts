@@ -179,44 +179,7 @@ function normalizeRetryConfig(options: RetryOptions): RetryConfig {
   };
 }
 
-export type RetryConfig = RetryOptions;
 
-export const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxRetries: DEFAULTS.maxRetries,
-  retryDelayMs: DEFAULTS.retryDelayMs,
-  maxRetryDelayMs: 10000,
-};
-
-/**
- * Determine if an error is retryable (429, 503, or network timeout)
- */
-export function isRetryable(err: any): boolean {
-  const status = err?.response?.status;
-  return (
-    status === 429 ||
-    status === 503 ||
-    err?.code === "ECONNABORTED" ||
-    err?.code === "ETIMEDOUT" ||
-    err?.message?.includes("timeout")
-  );
-}
-
-/**
- * Helper to sleep for a given duration.
- */
-export async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Helper to execute an async function with exponential backoff retry.
- *
- * @param fn - The async function to execute
- * @param options - Retry configuration
- * @param logger - Optional logger for instrumentation
- * @param label - A label for logging purposes
- * @returns The result of the function
- */
 export async function withRetry<T>(
   fn: () => Promise<T>,
   options: RetryOptions,

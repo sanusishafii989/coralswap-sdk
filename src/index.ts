@@ -35,6 +35,9 @@ export {
   CoralSwapConfig,
   NetworkConfig,
   NETWORK_CONFIGS,
+  TESTNET_NETWORK,
+  MAINNET_NETWORK,
+  STAGING_NETWORK,
   DEFAULTS,
   DEFAULT_SLIPPAGE,
   PRECISION,
@@ -65,11 +68,9 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
-  RWAModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult } from "@/modules";
-export type { RWAPrice, RWASwapQuote, RWAPoolAPY } from "@/modules";
 
 // Utilities
 export {
@@ -101,6 +102,7 @@ export {
   exceedsBudget,
   decodeDiagnosticEvents,
   buildSimulationResult,
+  estimateGas,
   withRetry,
   isRetryable,
   sleep,
@@ -109,7 +111,6 @@ export {
   validateNonNegativeAmount,
   validateSlippage,
   validateDistinctTokens,
-
   isValidPath,
   EventParser,
   EVENT_TOPICS,
@@ -124,6 +125,7 @@ export type {
   SimulationResourceEstimate,
   WaitNextLedgerOptions,
   DecodeEventsOptions,
+  SimulateFn,
 } from "./utils";
 
 // Errors
@@ -141,6 +143,5 @@ export {
   FlashLoanError,
   CircuitBreakerError,
   SignerError,
-  RWAError,
   mapError,
 } from "@/errors";

@@ -468,6 +468,8 @@ describe('CoralSwapClient', () => {
         secretKey: TEST_SECRET,
         maxRetries: 1,
         retryDelayMs: 10,
+        pollingIntervalMs: 10,
+        maxPollingAttempts: 3,
       });
 
       const mockGetAccount = jest.fn().mockResolvedValue(mockAccount);

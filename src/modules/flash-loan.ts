@@ -1,11 +1,11 @@
 import { CoralSwapClient } from "@/client";
-import { DEFAULTS } from "@/config";
 import {
   FlashLoanRequest,
   FlashLoanResult,
   FlashLoanFeeEstimate,
 } from "@/types/flash-loan";
 import { FlashLoanConfig } from "@/types/pool";
+import { GasEstimate } from "@/types/gas";
 import {
   calculateRepayment,
   validateFeeFloor,
@@ -19,6 +19,7 @@ import {
   mapError,
 } from "@/errors";
 import { validateAddress, validatePositiveAmount } from "@/utils/validation";
+import { estimateGas } from "@/utils/gas";
 
 /**
  * Flash Loan module -- first-class flash loan support for CoralSwap.
@@ -84,26 +85,28 @@ export class FlashLoanModule {
       amount,
       feeBps: config.flashFeeBps,
       feeAmount: actualFee,
-      feeFloor: DEFAULTS.flashFeeFloorBps,
+      feeFloor: Number(config.flashFeeFloor),
     };
   }
 
   /**
-   * Execute a flash loan transaction.
+   * Execute a flash loan transaction, or estimate its fee.
    *
-   * The receiver contract at receiverAddress must implement the
-   * on_flash_loan(sender, token, amount, fee, data) callback.
+   * Pass `{ estimateOnly: true }` to dry-run the simulation and return a
+   * {@link GasEstimate} without submitting.
    *
    * @param request - Parameters required to execute the flash loan
-   * @returns Receipt containing the transaction hash and flash loan details
+   * @param options.estimateOnly - When true, returns a fee estimate instead of submitting
+   * @returns Receipt containing the transaction hash and flash loan details, or a GasEstimate
    * @throws {FlashLoanError} If flash loans are locked or if fee config is invalid
    * @throws {TransactionError} If the execution on-chain fails
    * @example
-   * const result = await client.flashLoans.execute({
-   *   pairAddress: 'C...', token: 'C...', amount: 1000n, receiverAddress: 'C...', callbackData: Buffer.from('')
-   * });
+   * const result = await client.flashLoans.execute({ pairAddress: 'C...', ... });
+   * const gas = await client.flashLoans.execute({ pairAddress: 'C...', ... }, { estimateOnly: true });
    */
-  async execute(request: FlashLoanRequest): Promise<FlashLoanResult> {
+  async execute(request: FlashLoanRequest, options: { estimateOnly: true }): Promise<GasEstimate>;
+  async execute(request: FlashLoanRequest, options?: { estimateOnly?: false }): Promise<FlashLoanResult>;
+  async execute(request: FlashLoanRequest, options?: { estimateOnly?: boolean }): Promise<FlashLoanResult | GasEstimate> {
     validateAddress(request.pairAddress, "pairAddress");
     validateAddress(request.token, "token");
     validatePositiveAmount(request.amount, "amount");
@@ -121,12 +124,10 @@ export class FlashLoanModule {
       );
     }
 
-    const feeFloorBps = Number(config.flashFeeFloor);
-
-    if (!validateFeeFloor(config.flashFeeBps, feeFloorBps)) {
+    if (!validateFeeFloor(config.flashFeeBps, Number(config.flashFeeFloor))) {
       throw new FlashLoanError("Flash loan fee below protocol floor", {
         feeBps: config.flashFeeBps,
-        feeFloor: DEFAULTS.flashFeeFloorBps,
+        feeFloor: config.flashFeeFloor,
       });
     }
 
@@ -143,6 +144,10 @@ export class FlashLoanModule {
       request.receiverAddress,
       request.callbackData,
     );
+
+    if (options?.estimateOnly) {
+      return estimateGas((ops) => this.client.simulateTransaction(ops, {}), [op]);
+    }
 
     const result = await this.client.submitTransaction([op]);
 

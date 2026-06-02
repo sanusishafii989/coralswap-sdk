@@ -66,6 +66,45 @@ export class FactoryClient {
   }
 
   /**
+   * Build a transaction to create an RWA (Real-World Asset) trading pair.
+   *
+   * RWA pairs differ from vanilla pairs in that a NAV price feed address is
+   * recorded at creation time.  The on-chain factory stores the feed so that
+   * the pair contract can reference current NAV values for parity checks and
+   * governance-triggered rebalancing windows.
+   *
+   * @param source           - The address of the account submitting the transaction.
+   * @param tokenA           - Address of the first token (e.g. USDC stablecoin).
+   * @param tokenB           - Address of the second token (e.g. deJTRSY T-bill token).
+   * @param navPriceFeedAddress - RedStone oracle contract that publishes the NAV per
+   *                             RWA token.  Passed as the third argument to the
+   *                             `create_rwa_pair` entry-point on the factory contract.
+   * @returns An XDR operation ready to be included in a transaction.
+   *
+   * @example
+   * const op = client.factory.buildCreateRWAPair(
+   *   publicKey,
+   *   USDC_ADDRESS,
+   *   DEJTRS_ADDRESS,
+   *   REDSTONE_NAV_FEED_ADDRESS,
+   * );
+   * await client.submitTransaction([op]);
+   */
+  buildCreateRWAPair(
+    source: string,
+    tokenA: string,
+    tokenB: string,
+    navPriceFeedAddress: string,
+  ): xdr.Operation {
+    return this.contract.call(
+      "create_rwa_pair",
+      nativeToScVal(Address.fromString(tokenA), { type: "address" }),
+      nativeToScVal(Address.fromString(tokenB), { type: "address" }),
+      nativeToScVal(Address.fromString(navPriceFeedAddress), { type: "address" }),
+    );
+  }
+
+  /**
    * Query the pair address for a given token pair.
    *
    * @param tokenA - Address of the first token.

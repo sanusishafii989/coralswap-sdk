@@ -13,6 +13,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:integration": "jest --config jest.integration.config.js --runInBand",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rimraf dist",
@@ -21,6 +22,7 @@
     "examples:simple-swap": "ts-node examples/simple-swap.ts",
     "examples:provide-liquidity": "ts-node examples/provide-liquidity.ts",
     "examples:read-reserves": "ts-node examples/read-reserves.ts",
+    "examples:rwa-pool": "ts-node examples/rwa-pool.ts",
     "docs": "typedoc"
   },
   "keywords": [

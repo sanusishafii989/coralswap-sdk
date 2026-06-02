@@ -9,6 +9,7 @@ import {
   MultiHopSwapRequest,
   MultiHopSwapQuote,
 } from "@/types/swap";
+import { GasEstimate } from "@/types/gas";
 import { PRECISION, DEFAULTS } from "@/config";
 import {
   TransactionError,
@@ -24,6 +25,7 @@ import {
   isValidPath,
 } from '@/utils/validation';
 import { resolveTokenIdentifier } from '@/utils/addresses';
+import { estimateGas } from '@/utils/gas';
 
 
 /**
@@ -84,19 +86,23 @@ export class SwapModule {
   }
 
   /**
-   * Execute a swap transaction on-chain.
+   * Execute a swap transaction on-chain, or estimate its fee.
    *
-   * For multi-hop paths, invokes the router's swap_exact_tokens_for_tokens
-   * with the full path vector. For direct swaps, uses swap_exact_in /
-   * swap_exact_out as before.
+   * Pass `{ estimateOnly: true }` to run a dry-run simulation and receive a
+   * {@link GasEstimate} without submitting the transaction.
    *
    * @param request - The swap request configuration
-   * @returns Receipt containing the transaction hash and swap details
+   * @param options.estimateOnly - When true, returns a fee estimate instead of submitting
+   * @returns Receipt containing the transaction hash and swap details, or a GasEstimate
    * @throws {TransactionError} If the execution on-chain fails
+   * @throws {SimulationError} If estimateOnly simulation fails
    * @example
    * const result = await client.swap.execute({ tokenIn: 'C...', tokenOut: 'C...', amount: 100n, tradeType: TradeType.EXACT_IN });
+   * const gas = await client.swap.execute({ ... }, { estimateOnly: true });
    */
-  async execute(request: SwapRequest): Promise<SwapResult> {
+  async execute(request: SwapRequest, options: { estimateOnly: true }): Promise<GasEstimate>;
+  async execute(request: SwapRequest, options?: { estimateOnly?: false }): Promise<SwapResult>;
+  async execute(request: SwapRequest, options?: { estimateOnly?: boolean }): Promise<SwapResult | GasEstimate> {
     validatePositiveAmount(request.amount, 'amount');
 
     const passphrase = this.client.networkConfig.networkPassphrase;
@@ -141,6 +147,10 @@ export class SwapModule {
               quote.amountIn,
               quote.deadline,
             );
+    }
+
+    if (options?.estimateOnly) {
+      return estimateGas((ops) => this.client.simulateTransaction(ops, {}), [op]);
     }
 
     const result = await this.client.submitTransaction([op]);

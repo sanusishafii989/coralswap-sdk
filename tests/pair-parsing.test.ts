@@ -12,9 +12,14 @@ describe("PairClient Parsing", () => {
   let mockSimulateTransaction: jest.SpyInstance;
 
   beforeEach(() => {
+    client = new PairClient(PAIR_ADDRESS, new SorobanRpc.Server(RPC_URL), NETWORK_PASSPHRASE, {
+      maxRetries: 1,
+      baseDelayMs: 100,
+      maxDelayMs: 1000,
+    });
     client = new PairClient(
       PAIR_ADDRESS,
-      RPC_URL,
+      new SorobanRpc.Server(RPC_URL),
       NETWORK_PASSPHRASE,
       {
         maxRetries: 1,
@@ -257,7 +262,7 @@ describe("PairClient Parsing", () => {
     it("throws a descriptive error when no sourceAccount is configured", async () => {
       const clientWithoutAccount = new PairClient(
         PAIR_ADDRESS,
-        RPC_URL,
+        new SorobanRpc.Server(RPC_URL),
         NETWORK_PASSPHRASE,
         { maxRetries: 1, retryDelayMs: 100, maxRetryDelayMs: 1000 },
       );

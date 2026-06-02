@@ -88,30 +88,40 @@ export function getResourceEstimate(
 }
 
 /**
- * Decode the raw base64-XDR diagnostic events from a simulation response.
+ * Decode diagnostic events from a simulation response.
  *
- * The `events` field on a successful `SimulateTransactionResponse` is a
- * `string[]` where each entry is a base64-encoded `xdr.DiagnosticEvent`.
- * Entries that fail XDR parsing (e.g. due to schema version differences)
- * are returned with `decoded: null` so the caller can still access the
- * raw XDR string.
+ * SDK v12+ returns pre-decoded `xdr.DiagnosticEvent` objects on the
+ * `events` field of `SimulateTransactionSuccessResponse`. Older SDK
+ * versions returned base64-encoded XDR strings. This function handles
+ * both shapes so the codebase stays forward-compatible.
  *
  * @param rawEvents - The `events` array from the RPC response (may be undefined)
  * @returns Array of `SimulationDiagnosticEvent` objects
  */
 export function decodeDiagnosticEvents(
-  rawEvents: string[] | undefined,
+  rawEvents: xdr.DiagnosticEvent[] | string[] | undefined,
 ): SimulationDiagnosticEvent[] {
   if (!rawEvents || rawEvents.length === 0) return [];
 
-  return rawEvents.map((xdrStr): SimulationDiagnosticEvent => {
-    try {
-      return {
-        xdr: xdrStr,
-        decoded: xdr.DiagnosticEvent.fromXDR(xdrStr, 'base64'),
-      };
-    } catch {
-      return { xdr: xdrStr, decoded: null };
+  return rawEvents.map((event): SimulationDiagnosticEvent => {
+    if (typeof event === 'string') {
+      try {
+        return {
+          xdr: event,
+          decoded: xdr.DiagnosticEvent.fromXDR(event, 'base64'),
+        };
+      } catch {
+        return { xdr: event, decoded: null };
+      }
+    } else {
+      try {
+        return {
+          xdr: event.toXDR('base64'),
+          decoded: event,
+        };
+      } catch {
+        return { xdr: '', decoded: event };
+      }
     }
   });
 }
@@ -158,7 +168,7 @@ export function buildSimulationResult(
     cost: ok.cost
       ? { cpuInsns: ok.cost.cpuInsns, memBytes: ok.cost.memBytes }
       : null,
-    transactionData: ok.transactionData ?? null,
+    transactionData: ok.transactionData?.build() ?? null,
     latestLedger: ok.latestLedger,
     events,
     error: null,

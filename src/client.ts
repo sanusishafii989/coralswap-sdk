@@ -13,7 +13,6 @@ import { RouterClient } from '@/contracts/router';
 import { LPTokenClient } from '@/contracts/lp-token';
 import { TokenListModule } from '@/modules/tokens';
 import { FactoryModule } from '@/modules/factory';
-import { RWAModule } from '@/modules/rwa';
 import { KeypairSigner } from '@/utils/signer';
 import { TransactionPoller, PollingStrategy, PollingOptions } from '@/utils/polling';
 import { buildSimulationResult } from '@/utils/simulation';
@@ -45,7 +44,6 @@ export class CoralSwapClient {
   private _factory: FactoryClient | null = null;
   private _router: RouterClient | null = null;
   private _factoryModule: FactoryModule | null = null;
-  private _rwa: RWAModule | null = null;
   private _poller: TransactionPoller | null = null;
   private readonly logger?: Logger;
 
@@ -108,6 +106,10 @@ export class CoralSwapClient {
     return this._server;
   }
 
+  set server(server: SorobanRpc.Server) {
+    this._server = server;
+  }
+
   /**
    * Rotate to the next available RPC server in the fallback list.
    * @private
@@ -159,6 +161,7 @@ export class CoralSwapClient {
     // Handle custom RPC URL(s)
     if (config.rpcUrl) {
       this._rpcUrls = Array.isArray(config.rpcUrl) ? config.rpcUrl : [config.rpcUrl];
+      this.networkConfig = { ...this.networkConfig, rpcUrl: this._rpcUrls[0] };
     } else {
       this._rpcUrls = [this.networkConfig.rpcUrl];
     }
@@ -310,11 +313,6 @@ export class CoralSwapClient {
       this._factoryModule.clearCache();
     }
 
-    // Reset RWA module cache
-    if (this._rwa) {
-      this._rwa.clearCache();
-    }
-
     // Refresh signer if using built-in KeypairSigner
     if (this.config.secretKey) {
       const kpSigner = new KeypairSigner(
@@ -359,16 +357,6 @@ export class CoralSwapClient {
       this._factoryModule = new FactoryModule(this);
     }
     return this._factoryModule;
-  }
-
-  /**
-   * Access the RWA module for NAV-quoted pricing on Centrifuge assets.
-   */
-  rwa(): RWAModule {
-    if (!this._rwa) {
-      this._rwa = new RWAModule(this);
-    }
-    return this._rwa;
   }
 
   /**
@@ -592,8 +580,8 @@ export class CoralSwapClient {
       sourceKey,
       enhanced: isEnhanced,
     });
-    const account = await this.withRetry(
-      () => this.server.getAccount(sourceKey),
+    const account = await this.executeWithFallback(
+      (server) => server.getAccount(sourceKey),
       'simulateTransaction_getAccount',
     );
 
@@ -613,8 +601,8 @@ export class CoralSwapClient {
       operationCount: operations.length,
       enhanced: isEnhanced,
     });
-    const sim = await this.withRetry(
-      () => this.server.simulateTransaction(tx),
+    const sim = await this.executeWithFallback(
+      (server) => server.simulateTransaction(tx),
       'simulateTransaction_simulate',
     );
     this.logger?.debug('simulateTransaction (dry-run): completed', {
