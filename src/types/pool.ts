@@ -63,6 +63,26 @@ export interface FlashLoanConfig {
 }
 
 /**
+ * Batched metadata for a single trading pair returned by FactoryModule.getPairInfo().
+ *
+ * All five fields are fetched in a single parallel multicall so callers
+ * never need to make separate RPC requests for reserves, fee, and supply.
+ */
+export interface PairInfo {
+  /** Pair contract address. */
+  address: string;
+  /** Current reserve of tokenA (in tokenA's smallest unit). */
+  reserveA: bigint;
+  /** Current reserve of tokenB (in tokenB's smallest unit). */
+  reserveB: bigint;
+  /** Current dynamic fee in basis points (e.g. 30 = 0.30 %). */
+  feeBps: number;
+  /** Total LP token supply for this pair (i128). */
+  totalSupply: bigint;
+}
+
+
+/**
  * Combined pool info including reserves, fees, and flash config.
  */
 export interface PoolInfo extends PoolState {
@@ -71,7 +91,6 @@ export interface PoolInfo extends PoolState {
   /** Flash loan configuration */
   flashConfig: FlashLoanConfig;
 }
-
 /**
  * LP token position for a specific address.
  */
