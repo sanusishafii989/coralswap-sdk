@@ -197,6 +197,38 @@ export class CircuitBreakerError extends CoralSwapSDKError {
 }
 
 /**
+ * RedStone oracle price deviation exceeded the configured threshold.
+ */
+export class PriceDeviationError extends CoralSwapSDKError {
+  constructor(
+    executionPriceBps: number,
+    oraclePriceBps: number,
+    maxDeviationBps: number,
+  ) {
+    super(
+      "PRICE_DEVIATION_TOO_HIGH",
+      `Execution price deviates ${executionPriceBps} bps from oracle price (max allowed: ${maxDeviationBps} bps)`,
+      { executionPriceBps, oraclePriceBps, maxDeviationBps },
+    );
+    this.name = "PriceDeviationError";
+  }
+}
+
+/**
+ * RedStone oracle payload is stale (older than the allowed staleness window).
+ */
+export class StaleOracleError extends CoralSwapSDKError {
+  constructor(payloadTimestamp: number, maxAgeMs: number) {
+    super(
+      "STALE_ORACLE_PAYLOAD",
+      `RedStone payload is stale (timestamp: ${payloadTimestamp}, max age: ${maxAgeMs}ms)`,
+      { payloadTimestamp, maxAgeMs },
+    );
+    this.name = "StaleOracleError";
+  }
+}
+
+/**
  * No signing key configured.
  */
 export class SignerError extends CoralSwapSDKError {

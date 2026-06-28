@@ -126,6 +126,12 @@ export type {
   DecodeEventsOptions,
 } from "./utils";
 
+export {
+  verifyRedStonePayload,
+  estimateUsdValue,
+  DEFAULT_PRICE_GUARD_CONFIG,
+} from "@/utils/redstone";
+
 // Errors
 export {
   CoralSwapSDKError,
@@ -141,5 +147,7 @@ export {
   FlashLoanError,
   CircuitBreakerError,
   SignerError,
+  PriceDeviationError,
+  StaleOracleError,
   mapError,
 } from "@/errors";

@@ -8,6 +8,8 @@ import {
   HopResult,
   MultiHopSwapRequest,
   MultiHopSwapQuote,
+  SwapWithPriceGuardRequest,
+  PriceGuardConfig,
 } from "@/types/swap";
 import { PRECISION, DEFAULTS } from "@/config";
 import {
@@ -24,7 +26,11 @@ import {
   isValidPath,
 } from '@/utils/validation';
 import { resolveTokenIdentifier } from '@/utils/addresses';
-import { getPriceDeviation } from './price-feed';
+import {
+  verifyRedStonePayload,
+  estimateUsdValue,
+  DEFAULT_PRICE_GUARD_CONFIG,
+} from '@/utils/redstone';
 
 
 /**
@@ -39,9 +45,82 @@ import { getPriceDeviation } from './price-feed';
  */
 export class SwapModule {
   private client: CoralSwapClient;
+  private priceGuardConfig: PriceGuardConfig = { ...DEFAULT_PRICE_GUARD_CONFIG };
 
   constructor(client: CoralSwapClient) {
     this.client = client;
+  }
+
+  /**
+   * Update the price guard configuration (admin operation).
+   *
+   * @param minGuardedAmountUsd - Minimum swap size in USD (× 10^8) that triggers the guard.
+   * @param maxDeviationBps - Maximum allowed deviation from oracle price in basis points.
+   */
+  setPriceGuardConfig(minGuardedAmountUsd: bigint, maxDeviationBps: number): void {
+    if (maxDeviationBps < 0 || maxDeviationBps > 10000) {
+      throw new ValidationError("maxDeviationBps must be between 0 and 10000", {
+        maxDeviationBps,
+      });
+    }
+    this.priceGuardConfig = {
+      ...this.priceGuardConfig,
+      minGuardedAmountUsd,
+      maxDeviationBps,
+    };
+  }
+
+  /**
+   * Execute a swap with an optional RedStone oracle price guard.
+   *
+   * When `redstonePayload` is provided and the swap's USD value exceeds
+   * `priceGuardConfig.minGuardedAmountUsd`, the payload is verified:
+   *   - Staleness check: payload must be < 5 min old (configurable).
+   *   - Deviation check: execution price must not deviate more than
+   *     `maxDeviationBps` from the oracle price.
+   *
+   * Swaps below the threshold bypass the guard even without a payload.
+   *
+   * @param request - Swap request with optional `redstonePayload`.
+   * @param tokenInSymbol - RedStone feed symbol for tokenIn (e.g. "XLM").
+   * @param tokenOutSymbol - RedStone feed symbol for tokenOut (e.g. "USDC").
+   * @returns Swap execution result.
+   * @throws {StaleOracleError} If the payload is stale.
+   * @throws {PriceDeviationError} If execution price deviates beyond threshold.
+   */
+  async swapWithPriceGuard(
+    request: SwapWithPriceGuardRequest,
+    tokenInSymbol: string,
+    tokenOutSymbol: string,
+  ): Promise<SwapResult> {
+    const quote = request.quote ?? await this.getQuote(request);
+
+    const { redstonePayload } = request;
+
+    if (redstonePayload) {
+      // Determine whether this swap is large enough to require the guard.
+      const usdValue = estimateUsdValue(
+        quote.amountIn,
+        tokenInSymbol,
+        redstonePayload.prices,
+      );
+
+      const guardRequired =
+        usdValue === null || usdValue >= this.priceGuardConfig.minGuardedAmountUsd;
+
+      if (guardRequired) {
+        verifyRedStonePayload(
+          redstonePayload,
+          tokenInSymbol,
+          tokenOutSymbol,
+          quote.amountIn,
+          quote.amountOut,
+          this.priceGuardConfig,
+        );
+      }
+    }
+
+    return this.execute({ ...request, quote });
   }
 
   /**
@@ -90,9 +169,6 @@ export class SwapModule {
    * For multi-hop paths, invokes the router's swap_exact_tokens_for_tokens
    * with the full path vector. For direct swaps, uses swap_exact_in /
    * swap_exact_out as before.
-   *
-   * If `request.priceFeed` is provided, the realised execution price is
-   * checked against the oracle and the result is attached to the response.
    *
    * @param request - The swap request configuration
    * @returns Receipt containing the transaction hash and swap details
@@ -156,7 +232,7 @@ export class SwapModule {
       );
     }
 
-    const swapResult: SwapResult = {
+    return {
       txHash: result.txHash!,
       amountIn: quote.amountIn,
       amountOut: quote.amountOut,
@@ -164,19 +240,6 @@ export class SwapModule {
       ledger: result.data!.ledger,
       timestamp: Math.floor(Date.now() / 1000),
     };
-
-    if (request.priceFeed) {
-      const executionPrice = this.computeExecutionPrice(
-        quote.amountIn,
-        quote.amountOut,
-      );
-      swapResult.deviation = await getPriceDeviation(
-        executionPrice,
-        request.priceFeed,
-      );
-    }
-
-    return swapResult;
   }
 
   /**
@@ -513,7 +576,7 @@ export class SwapModule {
    *
    * Traverses the path from output token to input token, computing
    * `getAmountIn()` at each hop in reverse order. Returns hops in
-   * forward order (path[0]â†’path[1], path[1]â†’path[2], â€¦).
+   * forward order (path[0]→path[1], path[1]→path[2], …).
    *
    * @param amountOut - Desired output amount (in the final token's smallest unit).
    * @param path - Ordered token addresses describing the route.
@@ -702,30 +765,5 @@ export class SwapModule {
   private async isToken0(pair: PairClient, tokenIn: string): Promise<boolean> {
     const tokens = await pair.getTokens();
     return tokens.token0 === tokenIn;
-  }
-
-  /**
-   * Compute a rough execution price from raw swap amounts.
-   *
-   * Scales down large values to avoid precision loss when converting
-   * BigInt to Number.
-   */
-  private computeExecutionPrice(
-    amountIn: bigint,
-    amountOut: bigint,
-  ): number {
-    if (amountIn === 0n) return 0;
-    const scaleDown = (v: bigint) => {
-      let n = v;
-      let shift = 0;
-      while (n > 1000000000000000n) {
-        n /= 1000000n;
-        shift += 6;
-      }
-      return Number(n) * Math.pow(10, -shift);
-    };
-    const aIn = scaleDown(amountIn);
-    const aOut = scaleDown(amountOut);
-    return aOut / aIn;
   }
 }
