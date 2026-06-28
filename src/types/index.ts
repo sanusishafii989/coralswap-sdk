@@ -10,3 +10,4 @@ export * from './gas';
 export * from './treasury';
 export * from './alerts';
 export * from './webhooks';
+export * from './stop-loss';

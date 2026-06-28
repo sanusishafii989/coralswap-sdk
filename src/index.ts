@@ -71,6 +71,9 @@ export {
   TreasuryModule,
   AlertModule,
   LeaderboardModule,
+  PortfolioModule,
+  RiskMetricsModule,
+  StopLossModule,
   WebhookModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
