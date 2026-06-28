@@ -65,9 +65,13 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
+<<<<<<< ours
   PriceFeed,
   DeviationResult,
   getPriceDeviation,
+=======
+  LimitOrderModule,
+>>>>>>> theirs
 } from "@/modules";
 export type { TWAPObservation, TWAPResult, OptimalPath } from "@/modules";
 
@@ -147,7 +151,12 @@ export {
   FlashLoanError,
   CircuitBreakerError,
   SignerError,
+<<<<<<< ours
   PriceDeviationError,
   StaleOracleError,
+=======
+  OrderNotFoundError,
+  InvalidOperationError,
+>>>>>>> theirs
   mapError,
 } from "@/errors";

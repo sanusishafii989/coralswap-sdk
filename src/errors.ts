@@ -246,6 +246,7 @@ export class SignerError extends CoralSwapSDKError {
 }
 
 /**
+<<<<<<< ours
  * Cooldown period has not elapsed for unstaking.
  *
  * Thrown when {@link StakingModule.unstake} is called while
@@ -268,10 +269,19 @@ export class CooldownError extends CoralSwapSDKError {
     this.name = "CooldownError";
     this.cooldownEnd = cooldownEnd;
     this.canWithdrawAt = canWithdrawAt;
+=======
+ * Order not found or already cancelled.
+ */
+export class OrderNotFoundError extends CoralSwapSDKError {
+  constructor(orderId: string) {
+    super("ORDER_NOT_FOUND", `Order ${orderId} not found or has been cancelled`, { orderId });
+    this.name = "OrderNotFoundError";
+>>>>>>> theirs
   }
 }
 
 /**
+<<<<<<< ours
  * General staking operation error.
  *
  * Used for staking-specific failures such as attempting to claim
@@ -281,6 +291,14 @@ export class StakingError extends CoralSwapSDKError {
   constructor(message: string, details?: Record<string, unknown>) {
     super("STAKING_ERROR", message, details);
     this.name = "StakingError";
+=======
+ * Invalid operation attempted (e.g. cancelling a filled order).
+ */
+export class InvalidOperationError extends CoralSwapSDKError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super("INVALID_OPERATION", message, details);
+    this.name = "InvalidOperationError";
+>>>>>>> theirs
   }
 }
 
@@ -512,6 +530,25 @@ export function mapError(err: unknown): CoralSwapSDKError {
     normalizedMessage.includes("must be")
   ) {
     return new ValidationError(message);
+  }
+
+  // Order not found / already cancelled
+  if (
+    normalizedMessage.includes("order not found") ||
+    message.includes("ORDER_NOT_FOUND") ||
+    normalizedMessage.includes("already cancelled")
+  ) {
+    const orderIdMatch = message.match(/order\s+([^\s]+)/i);
+    return new OrderNotFoundError(orderIdMatch?.[1] ?? "unknown");
+  }
+
+  // Invalid operation (e.g. cancelling a filled order)
+  if (
+    normalizedMessage.includes("invalid operation") ||
+    message.includes("INVALID_OPERATION") ||
+    normalizedMessage.includes("already filled")
+  ) {
+    return new InvalidOperationError(message);
   }
 
   // Pair not found
