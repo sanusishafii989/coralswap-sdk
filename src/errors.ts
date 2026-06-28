@@ -210,6 +210,26 @@ export class SignerError extends CoralSwapSDKError {
 }
 
 /**
+ * Order not found or already cancelled.
+ */
+export class OrderNotFoundError extends CoralSwapSDKError {
+  constructor(orderId: string) {
+    super("ORDER_NOT_FOUND", `Order ${orderId} not found or has been cancelled`, { orderId });
+    this.name = "OrderNotFoundError";
+  }
+}
+
+/**
+ * Invalid operation attempted (e.g. cancelling a filled order).
+ */
+export class InvalidOperationError extends CoralSwapSDKError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super("INVALID_OPERATION", message, details);
+    this.name = "InvalidOperationError";
+  }
+}
+
+/**
  * Extract pair address from error details or message.
  */
 function extractPairAddress(err: unknown): string {
@@ -437,6 +457,25 @@ export function mapError(err: unknown): CoralSwapSDKError {
     normalizedMessage.includes("must be")
   ) {
     return new ValidationError(message);
+  }
+
+  // Order not found / already cancelled
+  if (
+    normalizedMessage.includes("order not found") ||
+    message.includes("ORDER_NOT_FOUND") ||
+    normalizedMessage.includes("already cancelled")
+  ) {
+    const orderIdMatch = message.match(/order\s+([^\s]+)/i);
+    return new OrderNotFoundError(orderIdMatch?.[1] ?? "unknown");
+  }
+
+  // Invalid operation (e.g. cancelling a filled order)
+  if (
+    normalizedMessage.includes("invalid operation") ||
+    message.includes("INVALID_OPERATION") ||
+    normalizedMessage.includes("already filled")
+  ) {
+    return new InvalidOperationError(message);
   }
 
   // Pair not found

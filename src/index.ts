@@ -68,10 +68,10 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
-  TaxReportingModule,
+  LimitOrderModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
-export type { TWAPObservation, TWAPResult, ExportOptions, TaxReportRow } from "@/modules";
+export type { TWAPObservation, TWAPResult } from "@/modules";
 
 // Utilities
 export {
@@ -117,9 +117,6 @@ export {
   EVENT_TOPICS,
   decodeEvents,
   decodeEventsFromXdr,
-  getVotingPower,
-  getVotingPowerAtLedger,
-  setVotingPowerQueryProvider,
 } from './utils';
 
 
@@ -130,9 +127,6 @@ export type {
   WaitNextLedgerOptions,
   DecodeEventsOptions,
   SimulateFn,
-  VotingPower,
-  VotingPowerQueryProvider,
-  VotingPowerQueryResult,
 } from "./utils";
 
 // Errors
@@ -151,5 +145,7 @@ export {
   FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
+  OrderNotFoundError,
+  InvalidOperationError,
   mapError,
 } from "@/errors";
