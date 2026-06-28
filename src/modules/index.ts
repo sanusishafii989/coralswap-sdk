@@ -8,3 +8,4 @@ export { FactoryModule } from './factory';
 export { RouterModule } from './router';
 export { LimitOrderModule } from './limit-orders';
 export { GovernanceModule } from './governance';
+export { StakingModule } from './staking';

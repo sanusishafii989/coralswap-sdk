@@ -68,7 +68,7 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
-  LimitOrderModule,
+  StakingModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult } from "@/modules";
@@ -145,7 +145,7 @@ export {
   FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
-  OrderNotFoundError,
-  InvalidOperationError,
+  CooldownError,
+  StakingError,
   mapError,
 } from "@/errors";

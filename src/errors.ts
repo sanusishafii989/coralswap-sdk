@@ -210,22 +210,41 @@ export class SignerError extends CoralSwapSDKError {
 }
 
 /**
- * Order not found or already cancelled.
+ * Cooldown period has not elapsed for unstaking.
+ *
+ * Thrown when {@link StakingModule.unstake} is called while
+ * the staker's position is still in its cooldown window.
  */
-export class OrderNotFoundError extends CoralSwapSDKError {
-  constructor(orderId: string) {
-    super("ORDER_NOT_FOUND", `Order ${orderId} not found or has been cancelled`, { orderId });
-    this.name = "OrderNotFoundError";
+export class CooldownError extends CoralSwapSDKError {
+  readonly cooldownEnd: number;
+  readonly canWithdrawAt: Date;
+
+  constructor(cooldownEnd: number) {
+    const canWithdrawAt = new Date(cooldownEnd * 1000);
+    super(
+      "COOLDOWN_ACTIVE",
+      `Cannot unstake: cooldown period has not elapsed. Withdrawal available at ${canWithdrawAt.toISOString()}`,
+      {
+        cooldownEnd,
+        canWithdrawAt: canWithdrawAt.toISOString(),
+      },
+    );
+    this.name = "CooldownError";
+    this.cooldownEnd = cooldownEnd;
+    this.canWithdrawAt = canWithdrawAt;
   }
 }
 
 /**
- * Invalid operation attempted (e.g. cancelling a filled order).
+ * General staking operation error.
+ *
+ * Used for staking-specific failures such as attempting to claim
+ * zero rewards or staking with insufficient balance.
  */
-export class InvalidOperationError extends CoralSwapSDKError {
+export class StakingError extends CoralSwapSDKError {
   constructor(message: string, details?: Record<string, unknown>) {
-    super("INVALID_OPERATION", message, details);
-    this.name = "InvalidOperationError";
+    super("STAKING_ERROR", message, details);
+    this.name = "StakingError";
   }
 }
 
@@ -457,25 +476,6 @@ export function mapError(err: unknown): CoralSwapSDKError {
     normalizedMessage.includes("must be")
   ) {
     return new ValidationError(message);
-  }
-
-  // Order not found / already cancelled
-  if (
-    normalizedMessage.includes("order not found") ||
-    message.includes("ORDER_NOT_FOUND") ||
-    normalizedMessage.includes("already cancelled")
-  ) {
-    const orderIdMatch = message.match(/order\s+([^\s]+)/i);
-    return new OrderNotFoundError(orderIdMatch?.[1] ?? "unknown");
-  }
-
-  // Invalid operation (e.g. cancelling a filled order)
-  if (
-    normalizedMessage.includes("invalid operation") ||
-    message.includes("INVALID_OPERATION") ||
-    normalizedMessage.includes("already filled")
-  ) {
-    return new InvalidOperationError(message);
   }
 
   // Pair not found
