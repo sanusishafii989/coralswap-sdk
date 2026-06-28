@@ -1,4 +1,6 @@
 import { TradeType } from "./common";
+import type { DeviationResult } from "../modules/price-feed";
+import type { PriceFeed } from "../modules/price-feed";
 
 /**
  * Filter parameters for querying historical swap events.
@@ -101,6 +103,14 @@ export interface SwapRequest {
   to?: string;
   /** Optional pre-fetched quote to execute against without re-fetching reserves */
   quote?: SwapQuote;
+  /**
+   * Optional price feed for pre-execution deviation check.
+   *
+   * When provided, `execute()` compares the realised execution price
+   * against the oracle price and attaches a `DeviationResult` to the
+   * returned `SwapResult`.
+   */
+  priceFeed?: PriceFeed;
 }
 
 /**
@@ -165,6 +175,14 @@ export interface SwapResult {
   ledger: number;
   /** Unix timestamp of the transaction */
   timestamp: number;
+  /**
+   * Price deviation check result, populated when a `priceFeed` was
+   * provided in the `SwapRequest`.
+   *
+   * Callers should inspect `isWithinBounds` before submitting a large
+   * swap to avoid unfavourable execution.
+   */
+  deviation?: DeviationResult;
 }
 
 /**

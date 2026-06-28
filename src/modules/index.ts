@@ -6,4 +6,4 @@ export { OracleModule, TWAPObservation, TWAPResult } from './oracle';
 export { TokenListModule } from './tokens';
 export { FactoryModule } from './factory';
 export { RouterModule } from './router';
-export { PositionsModule } from './positions';
+export { PriceFeed, DeviationResult, getPriceDeviation } from './price-feed';

@@ -1,6 +1,6 @@
 import { CoralSwapClient } from "@/client";
 import { PairClient } from "@/contracts/pair";
-import { TradeType as CommonTradeType } from "@/types/common";
+import { TradeType } from "@/types/common";
 import {
   SwapRequest,
   SwapQuote,
@@ -8,12 +8,7 @@ import {
   HopResult,
   MultiHopSwapRequest,
   MultiHopSwapQuote,
-  SwapHistoryFilter,
-  SwapHistoryEvent,
-  SwapSimulationResult,
 } from "@/types/swap";
-import { GasEstimate } from "@/types/gas";
-import { SwapEvent } from "@/types/events";
 import { PRECISION, DEFAULTS } from "@/config";
 import {
   TransactionError,
@@ -29,18 +24,8 @@ import {
   isValidPath,
 } from '@/utils/validation';
 import { resolveTokenIdentifier } from '@/utils/addresses';
-import { estimateGas } from '@/utils/gas';
-import { EventParser } from '@/utils/events';
-import { SorobanRpc } from '@stellar/stellar-sdk';
-import { getLimitOrders, getDcaExecutions } from './order-book';
-import { Trade, TradeFilter } from '../types/trade';
+import { getPriceDeviation } from './price-feed';
 
-
-/** Default ledger window when no fromLedger/toLedger is specified. */
-const DEFAULT_HISTORY_WINDOW = 1000;
-
-/** Default maximum results per query. */
-const DEFAULT_HISTORY_LIMIT = 200;
 
 /**
  * Swap module -- builds, quotes, and executes token swaps.
@@ -59,48 +44,6 @@ export class SwapModule {
     this.client = client;
   }
 
-  async getTradeHistory(address: string, filter?: TradeFilter): Promise<Trade[]> {
-    const swapHistory = await this.getSwapHistory({ userAddress: address });
-    const limitOrders = await getLimitOrders(address);
-    const dcaExecutions = await getDcaExecutions(address);
-
-    let allTrades: Trade[] = [
-      ...swapHistory.map(
-        (swap) =>
-          ({
-            type: 'swap',
-            tokenIn: swap.tokenIn,
-            tokenOut: swap.tokenOut,
-            amountIn: swap.amountIn,
-            amountOut: swap.amountOut,
-            price: Number(swap.amountOut) / Number(swap.amountIn),
-            timestamp: new Date(swap.timestamp * 1000),
-            txHash: swap.txHash,
-          } as Trade)
-      ),
-      ...limitOrders,
-      ...dcaExecutions,
-    ];
-
-    if (filter?.types) {
-      allTrades = allTrades.filter((trade) => filter.types!.includes(trade.type));
-    }
-    if (filter?.fromDate) {
-      allTrades = allTrades.filter((trade) => trade.timestamp >= filter.fromDate!);
-    }
-    if (filter?.toDate) {
-      allTrades = allTrades.filter((trade) => trade.timestamp <= filter.toDate!);
-    }
-
-    allTrades.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
-    if (filter?.limit) {
-      allTrades = allTrades.slice(0, filter.limit);
-    }
-
-    return allTrades;
-  }
-
   /**
    * Get an estimated swap quote without executing.
    *
@@ -112,7 +55,7 @@ export class SwapModule {
    * @returns The standard swap quote
    * @throws {ValidationError} If inputs are invalid or path has <2 tokens
    * @example
-   * const quote = await client.swap.getQuote({ tokenIn: 'C...', tokenOut: 'C...', amount: 100n, tradeType: CommonTradeType.EXACT_IN });
+   * const quote = await client.swap.getQuote({ tokenIn: 'C...', tokenOut: 'C...', amount: 100n, tradeType: TradeType.EXACT_IN });
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
     validatePositiveAmount(request.amount, 'amount');
@@ -142,23 +85,22 @@ export class SwapModule {
   }
 
   /**
-   * Execute a swap transaction on-chain, or estimate its fee.
+   * Execute a swap transaction on-chain.
    *
-   * Pass `{ estimateOnly: true }` to run a dry-run simulation and receive a
-   * {@link GasEstimate} without submitting the transaction.
+   * For multi-hop paths, invokes the router's swap_exact_tokens_for_tokens
+   * with the full path vector. For direct swaps, uses swap_exact_in /
+   * swap_exact_out as before.
+   *
+   * If `request.priceFeed` is provided, the realised execution price is
+   * checked against the oracle and the result is attached to the response.
    *
    * @param request - The swap request configuration
-   * @param options.estimateOnly - When true, returns a fee estimate instead of submitting
-   * @returns Receipt containing the transaction hash and swap details, or a GasEstimate
+   * @returns Receipt containing the transaction hash and swap details
    * @throws {TransactionError} If the execution on-chain fails
-   * @throws {SimulationError} If estimateOnly simulation fails
    * @example
-   * const result = await client.swap.execute({ tokenIn: 'C...', tokenOut: 'C...', amount: 100n, tradeType: CommonTradeType.EXACT_IN });
-   * const gas = await client.swap.execute({ ... }, { estimateOnly: true });
+   * const result = await client.swap.execute({ tokenIn: 'C...', tokenOut: 'C...', amount: 100n, tradeType: TradeType.EXACT_IN });
    */
-  async execute(request: SwapRequest, options: { estimateOnly: true }): Promise<GasEstimate>;
-  async execute(request: SwapRequest, options?: { estimateOnly?: false }): Promise<SwapResult>;
-  async execute(request: SwapRequest, options?: { estimateOnly?: boolean }): Promise<SwapResult | GasEstimate> {
+  async execute(request: SwapRequest): Promise<SwapResult> {
     validatePositiveAmount(request.amount, 'amount');
 
     const passphrase = this.client.networkConfig.networkPassphrase;
@@ -186,7 +128,7 @@ export class SwapModule {
       );
     } else {
       op =
-        request.tradeType === CommonTradeType.EXACT_IN
+        request.tradeType === TradeType.EXACT_IN
           ? this.client.router.buildSwapExactIn(
               request.to ?? this.client.publicKey,
               tokenIn,
@@ -205,10 +147,6 @@ export class SwapModule {
             );
     }
 
-    if (options?.estimateOnly) {
-      return estimateGas((ops) => this.client.simulateTransaction(ops, {}), [op]);
-    }
-
     const result = await this.client.submitTransaction([op]);
 
     if (!result.success) {
@@ -218,7 +156,7 @@ export class SwapModule {
       );
     }
 
-    return {
+    const swapResult: SwapResult = {
       txHash: result.txHash!,
       amountIn: quote.amountIn,
       amountOut: quote.amountOut,
@@ -226,6 +164,19 @@ export class SwapModule {
       ledger: result.data!.ledger,
       timestamp: Math.floor(Date.now() / 1000),
     };
+
+    if (request.priceFeed) {
+      const executionPrice = this.computeExecutionPrice(
+        quote.amountIn,
+        quote.amountOut,
+      );
+      swapResult.deviation = await getPriceDeviation(
+        executionPrice,
+        request.priceFeed,
+      );
+    }
+
+    return swapResult;
   }
 
   /**
@@ -241,7 +192,7 @@ export class SwapModule {
    * @throws {ValidationError} If path has fewer than 3 tokens.
    * @throws {PairNotFoundError} If any intermediate pair does not exist.
    * @example
-   * const quote = await client.swap.getMultiHopQuote({ path: ['A', 'B', 'C'], amount: 100n, tradeType: CommonTradeType.EXACT_IN });
+   * const quote = await client.swap.getMultiHopQuote({ path: ['A', 'B', 'C'], amount: 100n, tradeType: TradeType.EXACT_IN });
    */
   async getMultiHopQuote(request: MultiHopSwapRequest): Promise<MultiHopSwapQuote> {
     const passphrase = this.client.networkConfig.networkPassphrase;
@@ -254,16 +205,12 @@ export class SwapModule {
       );
     }
 
-    if (request.tradeType === CommonTradeType.EXACT_OUT) {
-      throw new ValidationError(
-        'EXACT_OUT trade type is not supported for multi-hop swaps',
-        { path },
-      );
-    }
-
     path.forEach((addr, i) => validateAddress(addr, `path[${i}]`));
 
-    const hops = await this.computeHops(request.amount, path);
+    const hops =
+      request.tradeType === TradeType.EXACT_OUT
+        ? await this.computeHopsReverse(request.amount, path)
+        : await this.computeHops(request.amount, path);
 
     const totalFeeAmount = hops.reduce((acc, h) => acc + h.feeAmount, 0n);
     const totalFeeBps = this.computeCompoundedFeeBps(hops.map((h) => h.feeBps));
@@ -308,7 +255,7 @@ export class SwapModule {
    * @throws {PairNotFoundError} If any intermediate pair does not exist.
    * @throws {TransactionError} If the on-chain transaction fails.
    * @example
-   * const result = await client.swap.executeMultiHop({ path: ['A', 'B', 'C'], amount: 100n, tradeType: CommonTradeType.EXACT_IN });
+   * const result = await client.swap.executeMultiHop({ path: ['A', 'B', 'C'], amount: 100n, tradeType: TradeType.EXACT_IN });
    */
   async executeMultiHop(request: MultiHopSwapRequest): Promise<SwapResult> {
     const quote = await this.getMultiHopQuote(request);
@@ -337,324 +284,6 @@ export class SwapModule {
       feePaid: quote.feeAmount,
       ledger: result.data!.ledger,
       timestamp: Math.floor(Date.now() / 1000),
-    };
-  }
-
-  /**
-   * Dry-run a swap against live on-chain reserve state without submitting a transaction.
-   *
-   * Reads the current reserves and dynamic fee from the pair contract via
-   * `simulateRead` (no transaction, no gas), then applies the standard
-   * Uniswap V2 AMM formula to compute the exact output that an actual swap
-   * would produce for the same block state.
-   *
-   * A `HIGH_PRICE_IMPACT` warning is attached when `priceImpactBps > 500`
-   * (i.e. the trade moves the price by more than 5%).
-   *
-   * @param tokenIn - Contract address of the input token.
-   * @param tokenOut - Contract address of the output token.
-   * @param amountIn - Exact input amount (in the token's smallest unit).
-   * @param pairAddress - Optional pair contract address. When omitted the
-   *   factory is queried to resolve the pair for `tokenIn`/`tokenOut`.
-   * @returns A {@link SwapSimulationResult} with `amountOut`, `priceImpactBps`,
-   *   `feeAmount`, `executionPrice`, and an optional `warning`.
-   * @throws {ValidationError} If any address is invalid or `amountIn` is zero.
-   * @throws {PairNotFoundError} If no pair exists for the token combination.
-   * @throws {InsufficientLiquidityError} If the pair has zero reserves.
-   *
-   * @example
-   * const sim = await swap.simulateSwap(
-   *   'CDLZ...', // tokenIn
-   *   'CBQH...', // tokenOut
-   *   1_000_000n,
-   * );
-   * if (sim.warning === 'HIGH_PRICE_IMPACT') {
-   *   console.warn('Large price impact:', sim.priceImpactBps, 'bps');
-   * }
-   * console.log('Expected output:', sim.amountOut);
-   */
-  async simulateSwap(
-    tokenIn: string,
-    tokenOut: string,
-    amountIn: bigint,
-    pairAddress?: string,
-  ): Promise<SwapSimulationResult> {
-    const passphrase = this.client.networkConfig.networkPassphrase;
-    const resolvedTokenIn = resolveTokenIdentifier(tokenIn, passphrase);
-    const resolvedTokenOut = resolveTokenIdentifier(tokenOut, passphrase);
-
-    validateAddress(resolvedTokenIn, 'tokenIn');
-    validateAddress(resolvedTokenOut, 'tokenOut');
-    validateDistinctTokens(resolvedTokenIn, resolvedTokenOut);
-    validatePositiveAmount(amountIn, 'amountIn');
-
-    // Resolve pair address via factory if not provided
-    const resolvedPair =
-      pairAddress ?? (await this.client.getPairAddress(resolvedTokenIn, resolvedTokenOut));
-    if (!resolvedPair) {
-      throw new PairNotFoundError(resolvedTokenIn, resolvedTokenOut);
-    }
-
-    const pair = this.client.pair(resolvedPair);
-
-    // Fetch reserves and fee in parallel — both are read-only contract views
-    const [reserves, feeBps] = await Promise.all([
-      pair.getReserves(),
-      pair.getDynamicFee(),
-    ]);
-
-    const { reserve0, reserve1 } = reserves;
-
-    if (reserve0 === 0n || reserve1 === 0n) {
-      throw new InsufficientLiquidityError(resolvedPair, {
-        tokenIn: resolvedTokenIn,
-        tokenOut: resolvedTokenOut,
-        reserve0: reserve0.toString(),
-        reserve1: reserve1.toString(),
-      });
-    }
-
-    // Determine which reserve corresponds to tokenIn
-    const isToken0In = await this.isToken0(pair, resolvedTokenIn);
-    const reserveIn = isToken0In ? reserve0 : reserve1;
-    const reserveOut = isToken0In ? reserve1 : reserve0;
-
-    // Apply the Uniswap V2 AMM formula with the dynamic fee
-    const amountOut = this.getAmountOut(amountIn, reserveIn, reserveOut, feeBps);
-
-    // Fee deducted from amountIn
-    const feeAmount = (amountIn * BigInt(feeBps)) / PRECISION.BPS_DENOMINATOR;
-
-    // Price impact: how much the trade moves the price relative to spot
-    const priceImpactBps = this.calculatePriceImpact(amountIn, amountOut, reserveIn, reserveOut);
-
-    // Execution price as an exact fraction (amountOut / amountIn)
-    const executionPrice = { numerator: amountOut, denominator: amountIn };
-
-    const result: SwapSimulationResult = {
-      amountOut,
-      priceImpactBps,
-      feeAmount,
-      executionPrice,
-    };
-
-    if (priceImpactBps > 500) {
-      result.warning = 'HIGH_PRICE_IMPACT';
-    }
-
-    return result;
-  }
-
-  /**
-   * Query historical swap events for a pool or address.
-   *
-   * Uses the Soroban RPC `getEvents` endpoint to fetch on-chain swap events
-   * and applies the provided filters client-side. Pagination is controlled
-   * via `fromLedger` / `toLedger`; both default to a 1000-ledger window
-   * ending at the current ledger when omitted.
-   *
-   * Filter semantics:
-   * - `pairAddress` alone  → all swaps in that pool
-   * - `userAddress` alone  → all swaps by that sender across all pools
-   * - both provided        → swaps by that sender in that pool (AND)
-   * - neither provided     → all swap events in the ledger window
-   *
-   * @param filter - Query parameters (pairAddress, userAddress, ledger range, limit)
-   * @returns Ordered array of SwapHistoryEvent (oldest first). Returns [] on no match.
-   * @throws {ValidationError} If pairAddress or userAddress is provided but invalid.
-   *
-   * @example
-   * // All swaps in a pool over the last 1000 ledgers
-   * const history = await client.swap.getSwapHistory({ pairAddress: 'C...' });
-   *
-   * @example
-   * // All swaps by a user in a specific ledger range
-   * const history = await client.swap.getSwapHistory({
-   *   userAddress: 'G...',
-   *   fromLedger: 50000,
-   *   toLedger: 51000,
-   * });
-   */
-  async getSwapHistory(filter: SwapHistoryFilter = {}): Promise<SwapHistoryEvent[]> {
-    const { pairAddress, userAddress, limit = DEFAULT_HISTORY_LIMIT } = filter;
-
-    // Validate optional addresses up-front
-    if (pairAddress) validateAddress(pairAddress, 'pairAddress');
-    if (userAddress) validateAddress(userAddress, 'userAddress');
-
-    // Resolve ledger range — default to last DEFAULT_HISTORY_WINDOW ledgers
-    const currentLedger = await this.client.getCurrentLedger();
-    const fromLedger = filter.fromLedger ?? Math.max(0, currentLedger - DEFAULT_HISTORY_WINDOW);
-    const toLedger = filter.toLedger ?? currentLedger;
-
-    if (fromLedger > toLedger) {
-      throw new ValidationError(
-        `fromLedger (${fromLedger}) must not be greater than toLedger (${toLedger})`,
-        { fromLedger, toLedger },
-      );
-    }
-
-    // Build the getEvents request.
-    // When pairAddress is given we scope the query to that contract, which is
-    // the most efficient path. Without it we query all contracts for "swap" topic.
-    const request: SorobanRpc.Server.GetEventsRequest = {
-      startLedger: fromLedger,
-      filters: [
-        {
-          type: 'contract',
-          contractIds: pairAddress ? [pairAddress] : [],
-          topics: [['swap']],
-        },
-      ],
-      limit,
-    };
-
-    const response = await this.client.server.getEvents(request);
-
-    if (!response || !Array.isArray(response.events)) {
-      return [];
-    }
-
-    const parser = new EventParser(pairAddress ? [pairAddress] : []);
-    const results: SwapHistoryEvent[] = [];
-
-    for (const rawEvent of response.events) {
-      // Respect toLedger upper bound (RPC only accepts startLedger, not endLedger)
-      if (rawEvent.ledger > toLedger) continue;
-
-      // Parse the raw event into a typed SwapEvent using the existing EventParser.
-      // The RPC returns events in a different shape than DiagnosticEvents, so we
-      // reconstruct the fields we need directly from the raw event value.
-      let swapEvent: SwapEvent | null = null;
-      try {
-        swapEvent = this.parseRawSwapEvent(rawEvent, parser);
-      } catch {
-        // Skip malformed events
-        continue;
-      }
-
-      if (!swapEvent) continue;
-
-      // Apply userAddress filter (AND with pairAddress if both given)
-      if (userAddress && swapEvent.sender !== userAddress) continue;
-
-      results.push({
-        txHash: swapEvent.txHash,
-        amountIn: swapEvent.amountIn,
-        amountOut: swapEvent.amountOut,
-        tokenIn: swapEvent.tokenIn,
-        tokenOut: swapEvent.tokenOut,
-        sender: swapEvent.sender,
-        pairAddress: swapEvent.contractId,
-        ledger: swapEvent.ledger,
-        timestamp: swapEvent.timestamp,
-        feeBps: swapEvent.feeBps,
-      });
-
-      if (results.length >= limit) break;
-    }
-
-    return results;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private helper: parse a raw RPC event into a SwapEvent
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Convert a raw `SorobanRpc.Api.EventResponse` entry into a typed SwapEvent.
-   *
-   * The RPC `getEvents` response carries decoded ScVal values in `event.value`
-   * and topic strings in `event.topic`. We reconstruct the SwapEvent fields
-   * directly from the decoded values rather than going through XDR re-encoding.
-   *
-   * Returns null if the event is not a swap event or cannot be decoded.
-   */
-  private parseRawSwapEvent(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rawEvent: any,
-    _parser: EventParser,
-  ): SwapEvent | null {
-    // Verify this is a swap event by checking the first topic
-    const topics: string[] = rawEvent.topic ?? [];
-    if (!topics.length || topics[0] !== 'swap') return null;
-
-    // The `value` field is an ScVal (already decoded by stellar-sdk)
-    const value = rawEvent.value;
-    if (!value) return null;
-
-    // Extract the ScMap entries
-    const map: Array<{ key: { sym?: () => { toString(): string }; str?: () => { toString(): string } }; val: unknown }> =
-      typeof value.map === 'function' ? value.map() : value._value;
-
-    if (!Array.isArray(map)) return null;
-
-    // Helper to get a map value by key name
-    const get = (key: string): unknown => {
-      for (const entry of map) {
-        const k = entry.key;
-        let keyStr: string | undefined;
-        try {
-          if (typeof k.sym === 'function') keyStr = k.sym().toString();
-          else if (typeof k.str === 'function') keyStr = k.str().toString();
-        } catch { /* skip */ }
-        if (keyStr === key) return entry.val;
-      }
-      return undefined;
-    };
-
-    // Decode address ScVal to string
-    const decodeAddr = (val: unknown): string => {
-      if (!val) throw new Error('missing address');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const v = val as any;
-      if (typeof v.address === 'function') return v.address().toString();
-      if (typeof v._value?.toString === 'function') return v._value.toString();
-      throw new Error('cannot decode address');
-    };
-
-    // Decode i128 ScVal to bigint
-    const decodeI128 = (val: unknown): bigint => {
-      if (!val) throw new Error('missing i128');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const v = val as any;
-      if (typeof v.i128 === 'function') {
-        const parts = v.i128();
-        return (BigInt(parts.hi().toString()) << 64n) + BigInt(parts.lo().toString());
-      }
-      throw new Error('cannot decode i128');
-    };
-
-    // Decode u32 ScVal to number
-    const decodeU32 = (val: unknown): number => {
-      if (!val) throw new Error('missing u32');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const v = val as any;
-      if (typeof v.u32 === 'function') return v.u32();
-      throw new Error('cannot decode u32');
-    };
-
-    const sender = decodeAddr(get('sender'));
-    const tokenIn = decodeAddr(get('token_in'));
-    const tokenOut = decodeAddr(get('token_out'));
-    const amountIn = decodeI128(get('amount_in'));
-    const amountOut = decodeI128(get('amount_out'));
-    const feeBps = decodeU32(get('fee_bps'));
-
-    return {
-      type: 'swap',
-      contractId: rawEvent.contractId ?? '',
-      ledger: rawEvent.ledger ?? 0,
-      timestamp: rawEvent.ledgerClosedAt
-        ? Math.floor(new Date(rawEvent.ledgerClosedAt).getTime() / 1000)
-        : rawEvent.ledger ?? 0,
-      txHash: rawEvent.txHash ?? '',
-      sender,
-      tokenIn,
-      tokenOut,
-      amountIn,
-      amountOut,
-      feeBps,
     };
   }
 
@@ -783,7 +412,7 @@ export class SwapModule {
     let amountIn: bigint;
     let amountOut: bigint;
 
-    if (request.tradeType === CommonTradeType.EXACT_IN) {
+    if (request.tradeType === TradeType.EXACT_IN) {
       amountIn = request.amount;
       amountOut = this.getAmountOut(
         amountIn,
@@ -841,13 +470,10 @@ export class SwapModule {
     request: SwapRequest,
     path: string[],
   ): Promise<SwapQuote> {
-    if (request.tradeType === CommonTradeType.EXACT_OUT) {
-      throw new ValidationError(
-        'EXACT_OUT trade type is not supported for multi-hop swaps',
-        { path },
-      );
-    }
-    const hops = await this.computeHops(request.amount, path);
+    const hops =
+      request.tradeType === TradeType.EXACT_OUT
+        ? await this.computeHopsReverse(request.amount, path)
+        : await this.computeHops(request.amount, path);
 
     // Aggregate totals
     const totalFeeAmount = hops.reduce((acc, h) => acc + h.feeAmount, 0n);
@@ -887,7 +513,7 @@ export class SwapModule {
    *
    * Traverses the path from output token to input token, computing
    * `getAmountIn()` at each hop in reverse order. Returns hops in
-   * forward order (path[0]→path[1], path[1]→path[2], …).
+   * forward order (path[0]â†’path[1], path[1]â†’path[2], â€¦).
    *
    * @param amountOut - Desired output amount (in the final token's smallest unit).
    * @param path - Ordered token addresses describing the route.
@@ -1076,5 +702,30 @@ export class SwapModule {
   private async isToken0(pair: PairClient, tokenIn: string): Promise<boolean> {
     const tokens = await pair.getTokens();
     return tokens.token0 === tokenIn;
+  }
+
+  /**
+   * Compute a rough execution price from raw swap amounts.
+   *
+   * Scales down large values to avoid precision loss when converting
+   * BigInt to Number.
+   */
+  private computeExecutionPrice(
+    amountIn: bigint,
+    amountOut: bigint,
+  ): number {
+    if (amountIn === 0n) return 0;
+    const scaleDown = (v: bigint) => {
+      let n = v;
+      let shift = 0;
+      while (n > 1000000000000000n) {
+        n /= 1000000n;
+        shift += 6;
+      }
+      return Number(n) * Math.pow(10, -shift);
+    };
+    const aIn = scaleDown(amountIn);
+    const aOut = scaleDown(amountOut);
+    return aOut / aIn;
   }
 }

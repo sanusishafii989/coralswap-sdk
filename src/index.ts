@@ -15,7 +15,7 @@
  * });
  *
  * const swap = client.swap();
- * const quote = await swap.getQuote({
+ * const quote = await client.swap.getQuote({
  *   tokenIn: 'CDLZ...',
  *   tokenOut: 'CBQH...',
  *   amount: 1000000n,
@@ -35,9 +35,6 @@ export {
   CoralSwapConfig,
   NetworkConfig,
   NETWORK_CONFIGS,
-  TESTNET_NETWORK,
-  MAINNET_NETWORK,
-  STAGING_NETWORK,
   DEFAULTS,
   DEFAULT_SLIPPAGE,
   PRECISION,
@@ -68,11 +65,11 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
-  TreasuryModule,
+  PriceFeed,
+  DeviationResult,
+  getPriceDeviation,
 } from "@/modules";
-export type { OptimalPath } from "@/modules/router";
-export type { TWAPObservation, TWAPResult } from "@/modules";
-export type { TreasuryModuleOptions } from "@/modules";
+export type { TWAPObservation, TWAPResult, OptimalPath } from "@/modules";
 
 // Utilities
 export {
@@ -104,7 +101,6 @@ export {
   exceedsBudget,
   decodeDiagnosticEvents,
   buildSimulationResult,
-  estimateGas,
   withRetry,
   isRetryable,
   sleep,
@@ -113,6 +109,7 @@ export {
   validateNonNegativeAmount,
   validateSlippage,
   validateDistinctTokens,
+
   isValidPath,
   EventParser,
   EVENT_TOPICS,
@@ -127,7 +124,6 @@ export type {
   SimulationResourceEstimate,
   WaitNextLedgerOptions,
   DecodeEventsOptions,
-  SimulateFn,
 } from "./utils";
 
 // Errors
@@ -143,7 +139,6 @@ export {
   PairNotFoundError,
   ValidationError,
   FlashLoanError,
-  FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
   mapError,
