@@ -68,9 +68,10 @@ export {
   OracleModule,
   TokenListModule,
   RouterModule,
+  TaxReportingModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
-export type { TWAPObservation, TWAPResult } from "@/modules";
+export type { TWAPObservation, TWAPResult, ExportOptions, TaxReportRow } from "@/modules";
 
 // Utilities
 export {

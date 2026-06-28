@@ -15,3 +15,6 @@ export {
   getStopLossOrders,
 } from './order-book';
 export { getQuorumStatus } from './governance';
+export { GovernanceModule } from './governance';
+export { TaxReportingModule } from './tax-reporting';
+export type { ExportOptions, TaxReportRow } from './tax-reporting';
