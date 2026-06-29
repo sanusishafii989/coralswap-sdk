@@ -60,6 +60,7 @@ export {
   isValidPath,
 } from './validation';
 
+export { parseChangelog } from './changelog';
 export { estimateGas } from './gas';
 export type { SimulateFn } from './gas';
 
