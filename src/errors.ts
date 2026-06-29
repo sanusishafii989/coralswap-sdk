@@ -286,6 +286,71 @@ export class CooldownError extends CoralSwapSDKError {
 }
 
 /**
+ * Price feed unavailable for a token.
+ *
+ * Thrown when a token's USD price cannot be derived from on-chain reserves
+ * because no stablecoin-paired pool exists or the pool has zero reserves.
+ */
+export class MissingPriceFeedError extends CoralSwapSDKError {
+  readonly tokenAddress: string;
+  readonly fallbackUsed: boolean;
+
+  constructor(tokenAddress: string, fallbackUsed = false) {
+    const message = fallbackUsed
+      ? `Price feed missing for token ${tokenAddress}; using zero-value fallback`
+      : `Price feed missing for token ${tokenAddress}; no stablecoin pair found`;
+    super("MISSING_PRICE_FEED", message, { tokenAddress, fallbackUsed });
+    this.name = "MissingPriceFeedError";
+    this.tokenAddress = tokenAddress;
+    this.fallbackUsed = fallbackUsed;
+  }
+}
+
+/**
+ * Address not found on the network.
+ *
+ * Thrown when a queried address has no on-chain state (no positions, no
+ * contract code) or the RPC cannot resolve it.
+ */
+export class AddressNotFoundError extends CoralSwapSDKError {
+  readonly address: string;
+  readonly network: string;
+
+  constructor(address: string, network: string) {
+    super(
+      "ADDRESS_NOT_FOUND",
+      `Address ${address} not found on ${network}`,
+      { address, network },
+    );
+    this.name = "AddressNotFoundError";
+    this.address = address;
+    this.network = network;
+  }
+}
+
+/**
+ * Portfolio calculation failed for a specific pool.
+ *
+ * Thrown when an error occurs while computing position value, reserves,
+ * or token balances for a particular pool during portfolio aggregation.
+ */
+export class PortfolioCalculationError extends CoralSwapSDKError {
+  readonly failedPool: string;
+  readonly reason: string;
+
+  constructor(failedPool: string, reason: string) {
+    super(
+      "PORTFOLIO_CALCULATION_ERROR",
+      `Portfolio calculation failed for pool ${failedPool}: ${reason}`,
+      { failedPool, reason },
+    );
+    this.name = "PortfolioCalculationError";
+    this.failedPool = failedPool;
+    this.reason = reason;
+  }
+}
+
+/**
  * Extract pair address from error details or message.
  */
 function extractPairAddress(err: unknown): string {

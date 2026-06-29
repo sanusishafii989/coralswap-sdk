@@ -8,6 +8,7 @@ export { FactoryModule } from './factory';
 export { RouterModule } from './router';
 export { TreasuryModule } from './treasury';
 export type { TreasuryModuleOptions } from './treasury';
+export { PortfolioModule } from './portfolio';
 export { AlertModule } from './alerts';
 export { LeaderboardModule } from './leaderboard';
 export type { TraderRanking, GetTopTradersOptions } from './leaderboard';

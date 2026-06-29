@@ -69,6 +69,7 @@ export {
   TokenListModule,
   RouterModule,
   TreasuryModule,
+  PortfolioModule,
   AlertModule,
   LeaderboardModule,
 } from "@/modules";
@@ -155,5 +156,8 @@ export {
   FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
+  MissingPriceFeedError,
+  AddressNotFoundError,
+  PortfolioCalculationError,
   mapError,
 } from "@/errors";
