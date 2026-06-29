@@ -29,7 +29,7 @@ export class WebhookModule {
     if (!this.deliveries.has(webhookId)) {
       this.deliveries.set(webhookId, []);
     }
-    
+
     const entry: WebhookDelivery = {
       timestamp: delivery.timestamp ?? Date.now(),
       payload: delivery.payload,

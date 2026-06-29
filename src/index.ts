@@ -159,5 +159,6 @@ export {
   FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
+  WebhookError,
   mapError,
 } from "@/errors";
