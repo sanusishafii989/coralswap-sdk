@@ -5,6 +5,14 @@ export { FeeModule } from './fees';
 export { OracleModule, TWAPObservation, TWAPResult } from './oracle';
 export { TokenListModule } from './tokens';
 export { FactoryModule } from './factory';
+export {
+  HealthCheckModule,
+  checkRPCHealth,
+  percentile,
+  getRPCLatency,
+  getContractStatus,
+  getBestEndpoint,
+} from './health-check';
 export { RouterModule } from './router';
 export { TreasuryModule } from './treasury';
 export type { TreasuryModuleOptions } from './treasury';
