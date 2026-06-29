@@ -69,6 +69,7 @@ export {
   TokenListModule,
   RouterModule,
   TreasuryModule,
+  StopLossModule,
   AlertModule,
   LeaderboardModule,
 } from "@/modules";

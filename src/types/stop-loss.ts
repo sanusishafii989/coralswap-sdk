@@ -52,6 +52,8 @@ export interface StopLossOrder {
   amount: bigint;
   /** Price at or below which the order fires. */
   triggerPrice: bigint;
+  /** Unix timestamp in milliseconds when the order was created, if available. */
+  createdAt?: number;
   /** Latest market price from the RedStone feed at query time. */
   currentPrice: bigint;
   /** RedStone feed identifier used for this order. */
@@ -63,4 +65,18 @@ export interface StopLossOrder {
    * is currently met and the order is eligible for execution.
    */
   triggered: boolean;
+}
+
+/**
+ * Query options for fetching multiple stop-loss orders for a user.
+ */
+export interface StopLossOrderQuery {
+  /** Restrict results to one or more lifecycle statuses. */
+  statuses?: StopLossStatus[];
+  /** Restrict results to triggered or non-triggered orders. */
+  triggered?: boolean;
+  /** Sort by creation time or trigger price. Defaults to `createdAt`. */
+  sortBy?: 'createdAt' | 'triggerPrice';
+  /** Sort direction. Defaults to `desc`. */
+  sortDirection?: 'asc' | 'desc';
 }
