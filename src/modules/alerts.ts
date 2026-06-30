@@ -1,80 +1,66 @@
-/**
- * Alerts module — configurable alert rules for CoralSwap protocol metrics.
- *
- * Define alert rules that monitor on-chain conditions (price, volume, liquidity,
- * gas costs, reserve changes) and trigger notifications when thresholds are
- * crossed. Alerts follow a lifecycle: `active` → `fired` → `acknowledged` →
- * `resolved`.
- *
- * ## Alert lifecycle
- *
- * ```
- *   active → (condition met) → fired → acknowledged → resolved
- *                                                       ↑
- *                                   (auto-resolve) ────┘
- * ```
- *
- * @module alerts
- */
-
 import { CoralSwapClient } from '@/client';
 import {
-  AlertConfig, AlertInstance, AlertSummary, AlertStatus, AlertSeverity, AlertCondition, AlertFrequency,
+  AlertConfigLegacy, AlertInstance, AlertSummary, AlertStatusLegacy, AlertSeverity, AlertCondition, AlertFrequency,
+  Alert,
+  AlertConfig,
+  AlertStatus,
+  PriceAlertConfig,
+  ILAlertConfig,
+  HealthAlertConfig,
+  VolumeAlertConfig,
+  PriceAlert,
+  ILAlert,
+  HealthAlert,
+  VolumeAlert,
 } from '@/types/alerts';
-import { ValidationError } from '@/errors';
-import { validateAddress } from '@/utils/validation';
+import { ValidationError, InsufficientLiquidityError, InvalidThresholdError } from '@/errors';
+import { validateAddress, validateDistinctTokens, validatePositiveAmount } from '@/utils/validation';
 
+const PRICE_SCALE = 1_000_000_000_000_000_000n;
+const PRICE_SCALE_SQRT = 1_000_000_000n;
+const BPS = 10_000n;
 const DEFAULT_COOLDOWN_SECONDS = 900;
 const MAX_ALERTS_PER_USER = 50;
 const DEFAULT_FREQUENCY: AlertFrequency = 'interval';
 
-/**
- * Alerts module — create, manage, and evaluate alert rules.
- *
- * @example
- * ```ts
- * const alerts = new AlertsModule(client);
- * const id = await alerts.createAlert({
- *   name: 'CORAL price above $1',
- *   condition: 'price_above',
- *   threshold: 100_000_000n,
- *   severity: 'info',
- *   monitoredAddresses: ['C...'],
- * });
- * const instance = await alerts.getAlert(id);
- * console.log(instance.status);
- * ```
- */
+interface StoredGenericAlert {
+  kind: 'generic';
+  id: string;
+  config: AlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+interface StoredPriceAlert {
+  kind: 'price';
+  id: string;
+  config: PriceAlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+interface StoredILAlert {
+  kind: 'il';
+  id: string;
+  config: ILAlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+type StoredAlert = StoredGenericAlert | StoredPriceAlert | StoredILAlert;
+
 export class AlertsModule {
   private readonly client: CoralSwapClient;
   private readonly rules: Map<string, AlertInstance> = new Map();
 
-  /**
-   * @param client - Configured CoralSwap client
-   */
   constructor(client: CoralSwapClient) {
     this.client = client;
   }
 
-  /**
-   * Create a new alert rule.
-   *
-   * @param config - Alert configuration (condition, threshold, severity, etc.)
-   * @returns The unique alert ID assigned to the new rule
-   * @throws {ValidationError} If addresses are invalid, threshold is non-positive,
-   *   or the maximum number of rules has been reached
-   * @example
-   * ```ts
-   * const id = await alerts.createAlert({
-   *   name: 'Volume spike',
-   *   condition: 'volume_above',
-   *   threshold: 500_000_000_000n,
-   *   severity: 'warning',
-   *   monitoredAddresses: [],
-   * });
-   * ```
-   */
-  async createAlert(config: AlertConfig): Promise<string> {
+  async createAlert(config: AlertConfigLegacy): Promise<string> {
     if (this.rules.size >= MAX_ALERTS_PER_USER) {
       throw new ValidationError(`Maximum of ${MAX_ALERTS_PER_USER} alert rules reached`);
     }
@@ -85,7 +71,7 @@ export class AlertsModule {
       throw new ValidationError('threshold must be a positive integer', { threshold: config.threshold.toString() });
     }
     const id = `alert_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const resolvedConfig: AlertConfig = {
+    const resolvedConfig: AlertConfigLegacy = {
       ...config,
       frequency: config.frequency ?? DEFAULT_FREQUENCY,
       cooldownSeconds: config.cooldownSeconds ?? DEFAULT_COOLDOWN_SECONDS,
@@ -95,33 +81,12 @@ export class AlertsModule {
     return id;
   }
 
-  /**
-   * Update an existing alert rule's configuration.
-   *
-   * @param alertId - ID of the alert to update
-   * @param updates - Partial alert configuration to apply
-   * @throws {ValidationError} If `alertId` does not exist
-   * @example
-   * ```ts
-   * await alerts.updateAlert(id, { threshold: 200_000_000n, severity: 'critical' });
-   * ```
-   */
-  async updateAlert(alertId: string, updates: Partial<AlertConfig>): Promise<void> {
+  async updateAlert(alertId: string, updates: Partial<AlertConfigLegacy>): Promise<void> {
     const existing = this.rules.get(alertId);
     if (!existing) throw new ValidationError(`Alert not found: ${alertId}`);
     this.rules.set(alertId, { ...existing, config: { ...existing.config, ...updates }, status: 'active' });
   }
 
-  /**
-   * Acknowledge a fired alert.
-   *
-   * @param alertId - ID of the fired alert to acknowledge
-   * @throws {ValidationError} If `alertId` does not exist or alert is not fired
-   * @example
-   * ```ts
-   * await alerts.acknowledgeAlert(id);
-   * ```
-   */
   async acknowledgeAlert(alertId: string): Promise<void> {
     const instance = this.rules.get(alertId);
     if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
@@ -129,102 +94,39 @@ export class AlertsModule {
     this.rules.set(alertId, { ...instance, status: 'acknowledged' });
   }
 
-  /**
-   * Resolve a fired or acknowledged alert.
-   *
-   * @param alertId - ID of the alert to resolve
-   * @throws {ValidationError} If `alertId` does not exist
-   * @example
-   * ```ts
-   * await alerts.resolveAlert(id);
-   * ```
-   */
   async resolveAlert(alertId: string): Promise<void> {
     const instance = this.rules.get(alertId);
     if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
     this.rules.set(alertId, { ...instance, status: 'resolved' });
   }
 
-  /**
-   * Permanently archive an alert rule.
-   *
-   * @param alertId - ID of the alert to archive
-   * @throws {ValidationError} If `alertId` does not exist
-   * @example
-   * ```ts
-   * await alerts.archiveAlert(id);
-   * ```
-   */
   async archiveAlert(alertId: string): Promise<void> {
     const instance = this.rules.get(alertId);
     if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
     this.rules.set(alertId, { ...instance, status: 'archived' });
   }
 
-  /**
-   * Pause or resume an alert rule.
-   *
-   * @param alertId - ID of the alert to toggle
-   * @param paused - `true` to pause, `false` to resume
-   * @throws {ValidationError} If `alertId` does not exist
-   * @example
-   * ```ts
-   * await alerts.setAlertPaused(id, true);
-   * ```
-   */
   async setAlertPaused(alertId: string, paused: boolean): Promise<void> {
     const instance = this.rules.get(alertId);
     if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
     this.rules.set(alertId, { ...instance, status: paused ? 'paused' : 'active' });
   }
 
-  /**
-   * Get a single alert instance by ID.
-   *
-   * @param alertId - Unique alert identifier
-   * @returns The alert instance with current evaluation state
-   * @throws {ValidationError} If `alertId` does not exist
-   * @example
-   * ```ts
-   * const alert = await alerts.getAlert(id);
-   * console.log(alert.status, alert.fireCount);
-   * ```
-   */
   async getAlert(alertId: string): Promise<AlertInstance> {
     const instance = this.rules.get(alertId);
     if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
     return instance;
   }
 
-  /**
-   * List all alert rules with optional status filter.
-   *
-   * @param statusFilter - Optional status to filter by
-   * @returns Array of matching alert instances
-   * @example
-   * ```ts
-   * const fired = await alerts.listAlerts('fired');
-   * ```
-   */
-  async listAlerts(statusFilter?: AlertStatus): Promise<AlertInstance[]> {
+  async listAlerts(statusFilter?: AlertStatusLegacy): Promise<AlertInstance[]> {
     const all = Array.from(this.rules.values());
     return statusFilter ? all.filter((a) => a.status === statusFilter) : all;
   }
 
-  /**
-   * Get an aggregated summary of all alert rules.
-   *
-   * @returns Summary with counts by severity, status, and recent firings
-   * @example
-   * ```ts
-   * const summary = await alerts.getAlertSummary();
-   * console.log(`${summary.firedLast24h} alerts fired in the last 24h`);
-   * ```
-   */
   async getAlertSummary(): Promise<AlertSummary> {
     const all = Array.from(this.rules.values());
     const bySeverity: Record<AlertSeverity, number> = { info: 0, warning: 0, critical: 0 };
-    const byStatus: Record<AlertStatus, number> = { active: 0, paused: 0, fired: 0, acknowledged: 0, resolved: 0, archived: 0 };
+    const byStatus: Record<AlertStatusLegacy, number> = { active: 0, paused: 0, fired: 0, acknowledged: 0, resolved: 0, archived: 0 };
     const now = Math.floor(Date.now() / 1000);
     const twentyFourHoursAgo = now - 86_400;
     let firedLast24h = 0;
@@ -236,15 +138,6 @@ export class AlertsModule {
     return { total: all.length, bySeverity, byStatus, firedLast24h };
   }
 
-  /**
-   * Evaluate all active alert rules against current on-chain data.
-   *
-   * @returns Array of alert IDs that fired during this evaluation cycle
-   * @example
-   * ```ts
-   * const fired = await alerts.evaluateAll();
-   * ```
-   */
   async evaluateAll(): Promise<string[]> {
     const fired: string[] = [];
     const now = Math.floor(Date.now() / 1000);
@@ -268,14 +161,6 @@ export class AlertsModule {
     return fired;
   }
 
-  /**
-   * Remove all archived alert rules from memory.
-   *
-   * @example
-   * ```ts
-   * alerts.cleanupArchived();
-   * ```
-   */
   cleanupArchived(): void {
     for (const [id, instance] of this.rules) {
       if (instance.status === 'archived') this.rules.delete(id);
@@ -316,4 +201,395 @@ export class AlertsModule {
       default: return false;
     }
   }
+}
+
+export class AlertModule {
+  private client: CoralSwapClient;
+  private alerts: Map<string, StoredAlert> = new Map();
+
+  constructor(client: CoralSwapClient) {
+    this.client = client;
+  }
+
+  async createAlert(config: AlertConfig): Promise<string> {
+    this.validateAlertConfig(config);
+    const id = generateId();
+    this.alerts.set(id, {
+      kind: 'generic',
+      id,
+      config,
+      target: config.target,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async createPriceAlert(config: PriceAlertConfig): Promise<string> {
+    this.validatePriceAlertConfig(config);
+    const id = generateId();
+    this.alerts.set(id, {
+      kind: 'price',
+      id,
+      config,
+      target: config.pairAddress,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async createILAlert(config: ILAlertConfig): Promise<string> {
+    this.validateILAlertConfig(config);
+    const id = generateId();
+    this.alerts.set(id, {
+      kind: 'il',
+      id,
+      config,
+      target: config.pairAddress,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async checkAlerts(address: string): Promise<Alert[]> {
+    const results: Alert[] = [];
+    const targetAlerts = Array.from(this.alerts.values())
+      .filter(a => a.target === address && a.triggeredAt === undefined);
+
+    for (const stored of targetAlerts) {
+      const alert = await this.checkStoredAlert(stored);
+      if (alert.triggered) {
+        stored.triggeredAt = Date.now();
+        results.push(alert);
+      }
+    }
+
+    return results;
+  }
+
+  deleteAlert(alertId: string): void {
+    if (!this.alerts.has(alertId)) {
+      throw new ValidationError(`Alert not found: ${alertId}`);
+    }
+    this.alerts.delete(alertId);
+  }
+
+  async checkPriceAlert(
+    config: PriceAlertConfig,
+    id: string,
+  ): Promise<PriceAlert> {
+    this.validatePriceAlertConfig(config);
+
+    const currentPrice = await this.getPoolPrice(
+      config.pairAddress,
+      config.tokenIn,
+      config.tokenOut,
+    );
+
+    const triggered = config.direction === 'above'
+      ? currentPrice >= config.thresholdPrice
+      : currentPrice <= config.thresholdPrice;
+    const status: AlertStatus = triggered ? 'triggered' : 'active';
+
+    return { id, type: 'price', config, currentPrice, status, triggered };
+  }
+
+  async checkILAlert(
+    config: ILAlertConfig,
+    id: string,
+  ): Promise<ILAlert> {
+    this.validateILAlertConfig(config);
+
+    const pair = this.client.pair(config.pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+    const tokens = await pair.getTokens();
+
+    this.validatePairTokens(tokens, config.tokenA, config.tokenB);
+
+    const isAToken0 = tokens.token0 === config.tokenA;
+    const reserveA = isAToken0 ? reserve0 : reserve1;
+    const reserveB = isAToken0 ? reserve1 : reserve0;
+
+    if (reserveA === 0n || reserveB === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const currentPrice = (reserveB * PRICE_SCALE) / reserveA;
+    const priceRatio = this.computePriceRatio(currentPrice, config.referencePrice);
+    const currentILBps = this.computeImpermanentLossBps(priceRatio);
+
+    const triggered = currentILBps >= config.maxImpermanentLossBps;
+    const status: AlertStatus = triggered ? 'triggered' : 'active';
+
+    return {
+      id,
+      type: 'il',
+      config,
+      currentILBps,
+      currentPrice,
+      status,
+      triggered,
+    };
+  }
+
+  async checkHealthAlert(
+    config: HealthAlertConfig,
+    id: string,
+  ): Promise<HealthAlert> {
+    validateAddress(config.pairAddress, 'pairAddress');
+
+    const pair = this.client.pair(config.pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const currentHealthScore = this.computeHealthScore(reserve0, reserve1);
+    const status: AlertStatus = 'active';
+    const triggered = false;
+
+    return { id, type: 'health', config, currentHealthScore, status, triggered };
+  }
+
+  async checkVolumeAlert(
+    config: VolumeAlertConfig,
+    id: string,
+  ): Promise<VolumeAlert> {
+    validateAddress(config.pairAddress, 'pairAddress');
+
+    const pair = this.client.pair(config.pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const currentVolume = reserve0 + reserve1;
+    const status: AlertStatus = 'active';
+    const triggered = false;
+
+    return { id, type: 'volume', config, currentVolume, status, triggered };
+  }
+
+  private async checkStoredAlert(stored: StoredAlert): Promise<Alert> {
+    switch (stored.kind) {
+      case 'price':
+        return this.checkPriceAlert(stored.config, stored.id);
+      case 'il':
+        return this.checkILAlert(stored.config, stored.id);
+      case 'generic':
+        return this.checkGenericStoredAlert(stored);
+    }
+  }
+
+  private async checkGenericStoredAlert(
+    stored: StoredGenericAlert,
+  ): Promise<Alert> {
+    switch (stored.config.type) {
+      case 'price':
+        return this.checkPriceFromStored(stored);
+      case 'il':
+        return this.checkILFromStored(stored);
+      case 'health':
+        return this.checkHealthFromStored(stored);
+      case 'volume':
+        return this.checkVolumeFromStored(stored);
+    }
+  }
+
+  private async checkPriceFromStored(
+    stored: StoredGenericAlert,
+  ): Promise<PriceAlert> {
+    const { target, threshold, direction } = stored.config;
+    const pair = this.client.pair(target);
+    const tokens = await pair.getTokens();
+
+    const priceConfig: PriceAlertConfig = {
+      tokenIn: tokens.token0,
+      tokenOut: tokens.token1,
+      pairAddress: target,
+      thresholdPrice: BigInt(Math.round(threshold * 1_000_000_000_000_000)) * 1000n,
+      direction,
+    };
+
+    return this.checkPriceAlert(priceConfig, stored.id);
+  }
+
+  private async checkILFromStored(stored: StoredGenericAlert): Promise<ILAlert> {
+    const { target, threshold } = stored.config;
+    const pair = this.client.pair(target);
+    const tokens = await pair.getTokens();
+
+    const { reserve0, reserve1 } = await pair.getReserves();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const referencePrice = (reserve1 * PRICE_SCALE) / reserve0;
+
+    const ilConfig: ILAlertConfig = {
+      tokenA: tokens.token0,
+      tokenB: tokens.token1,
+      pairAddress: target,
+      referencePrice,
+      maxImpermanentLossBps: Math.round(threshold),
+    };
+
+    return this.checkILAlert(ilConfig, stored.id);
+  }
+
+  private async checkHealthFromStored(
+    stored: StoredGenericAlert,
+  ): Promise<HealthAlert> {
+    const { target } = stored.config;
+    const config: HealthAlertConfig = { pairAddress: target };
+    return this.checkHealthAlert(config, stored.id);
+  }
+
+  private async checkVolumeFromStored(
+    stored: StoredGenericAlert,
+  ): Promise<VolumeAlert> {
+    const { target } = stored.config;
+    const config: VolumeAlertConfig = { pairAddress: target };
+    return this.checkVolumeAlert(config, stored.id);
+  }
+
+  private validateAlertConfig(config: AlertConfig): void {
+    validateAddress(config.target, 'target');
+
+    if (config.type === 'il') {
+      this.validateBps(config.threshold, 'threshold');
+    } else if (config.type === 'health') {
+      this.validateBps(config.threshold, 'threshold');
+    } else if (config.type === 'price') {
+      if (config.threshold <= 0) {
+        throw new InvalidThresholdError(config.type, config.threshold, 0, Infinity);
+      }
+    } else if (config.type === 'volume') {
+      if (config.threshold <= 0) {
+        throw new InvalidThresholdError(config.type, config.threshold, 0, Infinity);
+      }
+    }
+
+    this.validateDirection(config.direction);
+  }
+
+  private validatePriceAlertConfig(config: PriceAlertConfig): void {
+    validateAddress(config.tokenIn, 'tokenIn');
+    validateAddress(config.tokenOut, 'tokenOut');
+    validateAddress(config.pairAddress, 'pairAddress');
+    validateDistinctTokens(config.tokenIn, config.tokenOut);
+    validatePositiveAmount(config.thresholdPrice, 'thresholdPrice');
+    this.validateDirection(config.direction);
+  }
+
+  private validateILAlertConfig(config: ILAlertConfig): void {
+    validateAddress(config.tokenA, 'tokenA');
+    validateAddress(config.tokenB, 'tokenB');
+    validateAddress(config.pairAddress, 'pairAddress');
+    validateDistinctTokens(config.tokenA, config.tokenB);
+    validatePositiveAmount(config.referencePrice, 'referencePrice');
+    this.validateBps(config.maxImpermanentLossBps, 'maxImpermanentLossBps');
+  }
+
+  private async getPoolPrice(
+    pairAddress: string,
+    tokenIn: string,
+    tokenOut: string,
+  ): Promise<bigint> {
+    const pair = this.client.pair(pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+    const tokens = await pair.getTokens();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const isTokenInToken0 = tokens.token0 === tokenIn;
+    this.validatePairTokens(tokens, tokenIn, tokenOut);
+
+    const reserveIn = isTokenInToken0 ? reserve0 : reserve1;
+    const reserveOut = isTokenInToken0 ? reserve1 : reserve0;
+
+    return (reserveOut * PRICE_SCALE) / reserveIn;
+  }
+
+  private computePriceRatio(
+    currentPrice: bigint,
+    referencePrice: bigint,
+  ): bigint {
+    return (currentPrice * PRICE_SCALE) / referencePrice;
+  }
+
+  private computeImpermanentLossBps(priceRatio: bigint): number {
+    if (priceRatio <= 0n) return 0;
+
+    const sqrtRatio = this.sqrt(priceRatio);
+    const numerator = 2n * sqrtRatio * PRICE_SCALE_SQRT * BPS;
+    const denominator = PRICE_SCALE + priceRatio;
+
+    if (denominator === 0n) return 0;
+
+    const poolFractionBps = numerator / denominator;
+    const lossBps = poolFractionBps >= BPS ? 0 : Number(BPS - poolFractionBps);
+    return lossBps;
+  }
+
+  private computeHealthScore(reserve0: bigint, reserve1: bigint): number {
+    if (reserve0 === 0n || reserve1 === 0n) return 0;
+
+    const smaller = reserve0 < reserve1 ? reserve0 : reserve1;
+    const larger = reserve0 < reserve1 ? reserve1 : reserve0;
+
+    return Number((smaller * BPS) / larger);
+  }
+
+  private validatePairTokens(
+    tokens: { token0: string; token1: string },
+    tokenA: string,
+    tokenB: string,
+  ): void {
+    const hasA = tokens.token0 === tokenA || tokens.token1 === tokenA;
+    const hasB = tokens.token0 === tokenB || tokens.token1 === tokenB;
+
+    if (!hasA || !hasB) {
+      throw new ValidationError('tokens do not match pair tokens', {
+        tokenA,
+        tokenB,
+        token0: tokens.token0,
+        token1: tokens.token1,
+      });
+    }
+  }
+
+  private validateDirection(direction: string): void {
+    if (direction !== 'above' && direction !== 'below') {
+      throw new ValidationError('direction must be above or below', { direction });
+    }
+  }
+
+  private validateBps(value: number, name: string): void {
+    if (!Number.isInteger(value) || value < 0 || value > Number(BPS)) {
+      throw new ValidationError(`${name} must be an integer between 0 and 10000`, {
+        [name]: value,
+      });
+    }
+  }
+
+  private sqrt(value: bigint): bigint {
+    if (value < 0n) return 0n;
+    if (value === 0n) return 0n;
+    let x = value;
+    let y = (x + 1n) / 2n;
+    while (y < x) {
+      x = y;
+      y = (x + value / x) / 2n;
+    }
+    return x;
+  }
+}
+
+function generateId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }

@@ -11,3 +11,7 @@ export * from './treasury';
 export * from './alerts';
 export * from './webhooks';
 export * from './monitoring';
+export * from './stop-loss';
+export * from './risk-metrics';
+export * from './portfolio';
+export * from './governance';

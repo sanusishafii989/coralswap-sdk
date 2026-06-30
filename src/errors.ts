@@ -25,6 +25,16 @@ export class CoralSwapSDKError extends Error {
     this.details = details;
     Object.setPrototypeOf(this, new.target.prototype);
   }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      details: this.details,
+      stack: this.stack,
+    };
+  }
 }
 
 /**
@@ -128,6 +138,20 @@ export class InsufficientLiquidityError extends CoralSwapSDKError {
 }
 
 /**
+ * Threshold value is invalid.
+ */
+export class InvalidThresholdError extends CoralSwapSDKError {
+  constructor(alertType: string, value: number, min: number, max: number) {
+    super(
+      "INVALID_THRESHOLD",
+      `${alertType} threshold ${value} is out of range (${min}-${max})`,
+      { alertType, value, min, max },
+    );
+    this.name = "InvalidThresholdError";
+  }
+}
+
+/**
  * Pool not found for a token pair.
  */
 export class PairNotFoundError extends CoralSwapSDKError {
@@ -137,6 +161,20 @@ export class PairNotFoundError extends CoralSwapSDKError {
       tokenB,
     });
     this.name = "PairNotFoundError";
+  }
+}
+
+/**
+ * Webhook delivery failure.
+ */
+export class WebhookDeliveryError extends CoralSwapSDKError {
+  constructor(webhookId: string, statusCode: number, retryCount: number) {
+    super(
+      "WEBHOOK_DELIVERY_FAILED",
+      `Webhook ${webhookId} failed with status ${statusCode} after ${retryCount} retries`,
+      { webhookId, statusCode, retryCount },
+    );
+    this.name = "WebhookDeliveryError";
   }
 }
 
@@ -222,11 +260,11 @@ export class PriceDeviationError extends CoralSwapSDKError {
  * RedStone oracle payload is stale (older than the allowed staleness window).
  */
 export class StaleOracleError extends CoralSwapSDKError {
-  constructor(payloadTimestamp: number, maxAgeMs: number) {
+  constructor(asset: string, lastUpdate: number, maxAge: number) {
     super(
       "STALE_ORACLE_PAYLOAD",
-      `RedStone payload is stale (timestamp: ${payloadTimestamp}, max age: ${maxAgeMs}ms)`,
-      { payloadTimestamp, maxAgeMs },
+      `RedStone payload for ${asset} is stale (last update: ${lastUpdate}, max age: ${maxAge}ms)`,
+      { asset, lastUpdate, maxAge },
     );
     this.name = "StaleOracleError";
   }
@@ -282,6 +320,53 @@ export class CooldownError extends CoralSwapSDKError {
   constructor(cooldownEnd: bigint) {
     super("COOLDOWN_ERROR", `Cooldown period active until block ${cooldownEnd}`, { cooldownEnd });
     this.name = "CooldownError";
+  }
+}
+
+/**
+ * Webhook delivery or registration errors.
+ *
+ * Raised for programmer mistakes during registration or dispatch
+ * (invalid webhook id, unsupported URL scheme, etc.). Endpoints that
+ * simply fail to acknowledge a delivery return a
+ * {@link WebhookDeliveryResult} with `delivered: false` rather than
+ * throwing this error.
+ */
+export class WebhookError extends CoralSwapSDKError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super("WEBHOOK_ERROR", message, details);
+    this.name = "WebhookError";
+  }
+}
+
+/**
+ * Raised by {@link WebhookModule.sendWebhook} when the targeted
+ * webhook has been auto-disabled after recording the configured
+ * number of consecutive delivery failures. Callers can match on
+ * this class — rather than string-matching — to programmatically
+ * decide whether to surface the failure to the user, retry on a
+ * backoff, or call {@link WebhookModule.enableWebhook}.
+ *
+ * Extends {@link WebhookError} so existing `instanceof WebhookError`
+ * checks remain backward-compatible.
+ */
+export class WebhookDisabledError extends WebhookError {
+  override readonly code = "WEBHOOK_DISABLED";
+  readonly webhookId: string;
+  readonly consecutiveFailures: number;
+
+  constructor(
+    webhookId: string,
+    consecutiveFailures: number,
+    details?: Record<string, unknown>,
+  ) {
+    super(
+      `webhook "${webhookId}" is disabled after ${consecutiveFailures} consecutive failures`,
+      { webhookId, consecutiveFailures, ...details },
+    );
+    this.name = "WebhookDisabledError";
+    this.webhookId = webhookId;
+    this.consecutiveFailures = consecutiveFailures;
   }
 }
 
