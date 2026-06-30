@@ -1,4 +1,4 @@
-import { CoralSwapSDKError, mapContractError } from "./errors";
+import { CoralSwapSDKError } from "./errors";
 import {
   Contract,
   SorobanRpc,
