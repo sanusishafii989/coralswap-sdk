@@ -28,7 +28,9 @@
     "examples:governance-vote": "ts-node examples/governance-vote.ts",
     "docs": "typedoc",
     "fuzz": "jest --testPathPattern=fuzz --no-coverage",
-    "benchmark": "ts-node benchmarks/run.ts"
+    "benchmark": "ts-node benchmarks/run.ts",
+    "load-test": "ts-node benchmarks/load-test.ts",
+    "load-test:report": "ts-node benchmarks/load-test.ts --output benchmarks/load-test-report.json"
   },
   "keywords": [
     "coralswap",
