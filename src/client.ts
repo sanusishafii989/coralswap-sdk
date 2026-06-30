@@ -66,7 +66,7 @@ export class CoralSwapClient {
       maxDelayMs: this.config.maxRetryDelayMs ?? DEFAULTS.maxRetryDelayMs,
     };
 
-    let lastError: any;
+    let lastError: unknown;
     const initialIndex = this._currentRpcIndex;
 
     // We try each RPC URL at least once if needed
@@ -130,7 +130,7 @@ export class CoralSwapClient {
    * @private
    */
   private createRpcServer(url: string): SorobanRpc.Server {
-    const options: any = {
+    const options: Record<string, unknown> = {
       headers: this.config.rpcHeaders,
       ...this.config.fetchOptions,
     };
@@ -336,7 +336,7 @@ export class CoralSwapClient {
 
     this.logger?.info("setNetwork: network switched", {
       network: this.network,
-      rpcUrl: (this.networkConfig as any).rpcUrl,
+      rpcUrl: this.networkConfig.rpcUrl,
     });
   }
 

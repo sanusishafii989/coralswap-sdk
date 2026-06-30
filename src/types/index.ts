@@ -8,4 +8,6 @@ export * from './events';
 export * from './tokens';
 export * from './gas';
 export * from './treasury';
+export * from './stop-loss';
 export * from './alerts';
+export * from './webhooks';
