@@ -1,5 +1,6 @@
 import { CoralSwapClient } from '@/client';
 import {
+  AlertConfigLegacy, AlertInstance, AlertSummary, AlertStatusLegacy, AlertSeverity, AlertCondition, AlertFrequency,
   Alert,
   AlertConfig,
   AlertStatus,
@@ -13,15 +14,14 @@ import {
   VolumeAlert,
 } from '@/types/alerts';
 import { ValidationError, InsufficientLiquidityError, InvalidThresholdError } from '@/errors';
-import {
-  validateAddress,
-  validateDistinctTokens,
-  validatePositiveAmount,
-} from '@/utils/validation';
+import { validateAddress, validateDistinctTokens, validatePositiveAmount } from '@/utils/validation';
 
 const PRICE_SCALE = 1_000_000_000_000_000_000n;
 const PRICE_SCALE_SQRT = 1_000_000_000n;
 const BPS = 10_000n;
+const DEFAULT_COOLDOWN_SECONDS = 900;
+const MAX_ALERTS_PER_USER = 50;
+const DEFAULT_FREQUENCY: AlertFrequency = 'interval';
 
 interface StoredGenericAlert {
   kind: 'generic';
@@ -51,6 +51,157 @@ interface StoredILAlert {
 }
 
 type StoredAlert = StoredGenericAlert | StoredPriceAlert | StoredILAlert;
+
+export class AlertsModule {
+  private readonly client: CoralSwapClient;
+  private readonly rules: Map<string, AlertInstance> = new Map();
+
+  constructor(client: CoralSwapClient) {
+    this.client = client;
+  }
+
+  async createAlert(config: AlertConfigLegacy): Promise<string> {
+    if (this.rules.size >= MAX_ALERTS_PER_USER) {
+      throw new ValidationError(`Maximum of ${MAX_ALERTS_PER_USER} alert rules reached`);
+    }
+    for (const addr of config.monitoredAddresses) {
+      validateAddress(addr, 'monitoredAddresses');
+    }
+    if (config.threshold <= 0n) {
+      throw new ValidationError('threshold must be a positive integer', { threshold: config.threshold.toString() });
+    }
+    const id = `alert_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const resolvedConfig: AlertConfigLegacy = {
+      ...config,
+      frequency: config.frequency ?? DEFAULT_FREQUENCY,
+      cooldownSeconds: config.cooldownSeconds ?? DEFAULT_COOLDOWN_SECONDS,
+      enabled: config.enabled ?? true,
+    };
+    this.rules.set(id, { id, config: resolvedConfig, status: 'active', fireCount: 0 });
+    return id;
+  }
+
+  async updateAlert(alertId: string, updates: Partial<AlertConfigLegacy>): Promise<void> {
+    const existing = this.rules.get(alertId);
+    if (!existing) throw new ValidationError(`Alert not found: ${alertId}`);
+    this.rules.set(alertId, { ...existing, config: { ...existing.config, ...updates }, status: 'active' });
+  }
+
+  async acknowledgeAlert(alertId: string): Promise<void> {
+    const instance = this.rules.get(alertId);
+    if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
+    if (instance.status !== 'fired') throw new ValidationError(`Cannot acknowledge alert in status ${instance.status}`);
+    this.rules.set(alertId, { ...instance, status: 'acknowledged' });
+  }
+
+  async resolveAlert(alertId: string): Promise<void> {
+    const instance = this.rules.get(alertId);
+    if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
+    this.rules.set(alertId, { ...instance, status: 'resolved' });
+  }
+
+  async archiveAlert(alertId: string): Promise<void> {
+    const instance = this.rules.get(alertId);
+    if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
+    this.rules.set(alertId, { ...instance, status: 'archived' });
+  }
+
+  async setAlertPaused(alertId: string, paused: boolean): Promise<void> {
+    const instance = this.rules.get(alertId);
+    if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
+    this.rules.set(alertId, { ...instance, status: paused ? 'paused' : 'active' });
+  }
+
+  async getAlert(alertId: string): Promise<AlertInstance> {
+    const instance = this.rules.get(alertId);
+    if (!instance) throw new ValidationError(`Alert not found: ${alertId}`);
+    return instance;
+  }
+
+  async listAlerts(statusFilter?: AlertStatusLegacy): Promise<AlertInstance[]> {
+    const all = Array.from(this.rules.values());
+    return statusFilter ? all.filter((a) => a.status === statusFilter) : all;
+  }
+
+  async getAlertSummary(): Promise<AlertSummary> {
+    const all = Array.from(this.rules.values());
+    const bySeverity: Record<AlertSeverity, number> = { info: 0, warning: 0, critical: 0 };
+    const byStatus: Record<AlertStatusLegacy, number> = { active: 0, paused: 0, fired: 0, acknowledged: 0, resolved: 0, archived: 0 };
+    const now = Math.floor(Date.now() / 1000);
+    const twentyFourHoursAgo = now - 86_400;
+    let firedLast24h = 0;
+    for (const instance of all) {
+      bySeverity[instance.config.severity]++;
+      byStatus[instance.status]++;
+      if (instance.lastFiredAt && instance.lastFiredAt >= twentyFourHoursAgo) firedLast24h++;
+    }
+    return { total: all.length, bySeverity, byStatus, firedLast24h };
+  }
+
+  async evaluateAll(): Promise<string[]> {
+    const fired: string[] = [];
+    const now = Math.floor(Date.now() / 1000);
+    for (const [id, instance] of this.rules) {
+      if (instance.status === 'paused' || instance.status === 'archived' || instance.status === 'resolved') continue;
+      if (!instance.config.enabled) continue;
+      if (instance.config.frequency === 'interval' && instance.lastFiredAt &&
+          now - instance.lastFiredAt < (instance.config.cooldownSeconds ?? DEFAULT_COOLDOWN_SECONDS)) continue;
+      if (instance.config.frequency === 'once' && instance.fireCount > 0) continue;
+      const currentValue = await this.fetchMetric(instance.config.condition, instance.config.monitoredAddresses);
+      const triggered = this.evaluateCondition(instance.config.condition, currentValue, instance.config.threshold);
+      const updated: AlertInstance = { ...instance, currentValue, lastEvaluatedAt: now };
+      if (triggered) {
+        updated.status = 'fired';
+        updated.lastFiredAt = now;
+        updated.fireCount += 1;
+        fired.push(id);
+      }
+      this.rules.set(id, updated);
+    }
+    return fired;
+  }
+
+  cleanupArchived(): void {
+    for (const [id, instance] of this.rules) {
+      if (instance.status === 'archived') this.rules.delete(id);
+    }
+  }
+
+  private async fetchMetric(condition: AlertCondition, addresses: string[]): Promise<bigint> {
+    switch (condition) {
+      case 'price_above': case 'price_below': return this.fetchPrice(addresses[0]);
+      case 'volume_above': return this.fetchVolume24h(addresses);
+      case 'liquidity_below': return this.fetchLiquidity(addresses);
+      case 'gas_above': return this.fetchAverageGas();
+      case 'reserve_change': return this.fetchReserveChange(addresses[0]);
+      default: return 0n;
+    }
+  }
+
+  private async fetchPrice(_address: string): Promise<bigint> {
+    try { const p = this.client.pair(_address); const r = await p.getReserves(); return r.reserve0 === 0n || r.reserve1 === 0n ? 0n : (r.reserve1 * 10_000_000n) / r.reserve0; }
+    catch { return 0n; }
+  }
+
+  private async fetchVolume24h(_addresses: string[]): Promise<bigint> { return 0n; }
+
+  private async fetchLiquidity(_addresses: string[]): Promise<bigint> {
+    try { let t = 0n; for (const a of _addresses) { const p = this.client.pair(a); const r = await p.getReserves(); t += r.reserve0 + r.reserve1; } return t; }
+    catch { return 0n; }
+  }
+
+  private async fetchAverageGas(): Promise<bigint> { return 0n; }
+  private async fetchReserveChange(_address: string): Promise<bigint> { return 0n; }
+
+  private evaluateCondition(condition: AlertCondition, current: bigint, threshold: bigint): boolean {
+    switch (condition) {
+      case 'price_above': case 'volume_above': case 'gas_above': return current >= threshold;
+      case 'price_below': case 'liquidity_below': return current <= threshold;
+      case 'reserve_change': return current >= threshold;
+      default: return false;
+    }
+  }
+}
 
 export class AlertModule {
   private client: CoralSwapClient;

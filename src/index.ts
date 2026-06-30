@@ -76,15 +76,14 @@ export {
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult } from "@/modules";
 export type { TreasuryModuleOptions, LeaderboardEntry, LeaderboardOptions } from "@/modules";
+  AlertsModule,
+  WebhooksModule,
+  MonitoringModule,
   StopLossModule,
   AlertModule,
   LeaderboardModule,
-  PortfolioModule,
-  RiskMetricsModule,
-  StopLossModule,
   WebhookModule,
   TaxReportingModule,
-  RiskMetricsModule,
   GovernanceModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
