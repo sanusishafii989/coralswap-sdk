@@ -28,6 +28,66 @@ export function validateAddress(address: string, name: string): void {
 }
 
 /**
+ * Validate that optional date range values are well-formed and historically safe.
+ *
+ * Ensures that:
+ * - both dates are real dates when provided
+ * - fromDate is earlier than toDate
+ * - neither date is in the future
+ */
+export function validateDateRange(fromDate?: Date, toDate?: Date): void {
+  const now = new Date();
+
+  if (fromDate !== undefined) {
+    if (!(fromDate instanceof Date) || Number.isNaN(fromDate.getTime())) {
+      throw new ValidationError(`fromDate must be a valid Date, got ${fromDate}`, {
+        fromDate,
+      });
+    }
+    if (fromDate > now) {
+      throw new ValidationError(`fromDate cannot be in the future, got ${fromDate.toISOString()}`, {
+        fromDate: fromDate.toISOString(),
+      });
+    }
+  }
+
+  if (toDate !== undefined) {
+    if (!(toDate instanceof Date) || Number.isNaN(toDate.getTime())) {
+      throw new ValidationError(`toDate must be a valid Date, got ${toDate}`, {
+        toDate,
+      });
+    }
+    if (toDate > now) {
+      throw new ValidationError(`toDate cannot be in the future, got ${toDate.toISOString()}`, {
+        toDate: toDate.toISOString(),
+      });
+    }
+  }
+
+  if (fromDate && toDate && fromDate >= toDate) {
+    throw new ValidationError(
+      `fromDate must be earlier than toDate, got fromDate=${fromDate.toISOString()} and toDate=${toDate.toISOString()}`,
+      { fromDate: fromDate.toISOString(), toDate: toDate.toISOString() },
+    );
+  }
+}
+
+/**
+ * Validate that an optional limit is a positive integer within the supported range.
+ */
+export function validateLimit(limit: number | undefined, name: string = "limit"): void {
+  if (limit === undefined) {
+    return;
+  }
+
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 1000) {
+    throw new ValidationError(`${name} must be an integer between 1 and 1000, got ${limit}`, {
+      [name]: limit,
+    });
+  }
+}
+
+/**
  * Validate that a bigint amount is strictly positive (> 0n).
  *
  * @param amount - The amount to validate.

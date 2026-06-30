@@ -15,6 +15,8 @@ import {
   PortfolioCalculationError,
   CoralSwapSDKError,
 } from "@/errors";
+import { ValidationError } from "@/errors";
+import { validateAddress, validateDateRange, validateLimit } from "@/utils/validation";
 
 const STROOP = 1e7;
 
@@ -45,6 +47,7 @@ export class PortfolioModule extends TreasuryModule {
     owner: string,
     options: GetPortfolioOptions = {},
   ): Promise<Portfolio> {
+    this.validatePortfolioInputs(owner, options);
     return this.get(owner, options);
   }
 
@@ -52,7 +55,7 @@ export class PortfolioModule extends TreasuryModule {
     owner: string,
     options: GetPortfolioOptions = {},
   ): Promise<Portfolio> {
-    validateAddress(owner, "owner");
+    this.validatePortfolioInputs(owner, options);
 
     let summary;
     try {
@@ -113,10 +116,39 @@ export class PortfolioModule extends TreasuryModule {
     return { owner, positions, totalValueUSD };
   }
 
+  private validatePortfolioInputs(
+    owner: string,
+    options: GetPortfolioOptions = {},
+  ): void {
+    // Fail fast on invalid wallet or contract addresses before any RPC work starts.
+    validateAddress(owner, "owner");
+
+    // Validate any explicitly supplied pair addresses as Stellar account or contract IDs.
+    if (options.pairAddresses !== undefined) {
+      if (!Array.isArray(options.pairAddresses)) {
+        throw new ValidationError("pairAddresses must be an array of Stellar addresses", {
+          pairAddresses: options.pairAddresses,
+        });
+      }
+
+      options.pairAddresses.forEach((address, index) => {
+        validateAddress(address, `pairAddresses[${index}]`);
+      });
+    }
+
+    // Historical portfolio queries must use a sensible, monotonic date window.
+    validateDateRange(options.fromDate, options.toDate);
+
+    // Limits are capped to protect callers from oversized responses and accidental abuse.
+    validateLimit(options.limit);
+  }
+
   /**
    * Capture a snapshot from a portfolio result for later PnL comparison.
    */
   createSnapshot(portfolio: Portfolio): PortfolioEntrySnapshot {
+    validateAddress(portfolio.owner, "portfolio.owner");
+
     return {
       owner: portfolio.owner,
       totalValueUSD: portfolio.totalValueUSD,
@@ -141,7 +173,8 @@ export class PortfolioModule extends TreasuryModule {
     owner: string,
     entry: PortfolioEntrySnapshot,
   ): Promise<PortfolioPnL> {
-    validateAddress(owner, "owner");
+    this.validatePortfolioInputs(owner, {});
+    validateAddress(entry.owner, "entry.owner");
 
     const pairAddresses = entry.positions.map((p) => p.pairAddress);
     const current = await this.getPortfolio(owner, { pairAddresses });

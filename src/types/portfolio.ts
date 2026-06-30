@@ -71,4 +71,10 @@ export interface PortfolioPnL {
 export interface GetPortfolioOptions {
   /** Specific pair addresses to include; defaults to all factory pairs */
   pairAddresses?: string[];
+  /** Optional lower bound for historical portfolio queries */
+  fromDate?: Date;
+  /** Optional upper bound for historical portfolio queries */
+  toDate?: Date;
+  /** Optional maximum number of positions to return */
+  limit?: number;
 }
