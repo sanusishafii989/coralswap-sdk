@@ -13,3 +13,4 @@ export * from './webhooks';
 export * from './stop-loss';
 export * from './risk-metrics';
 export * from './portfolio';
+export * from './governance';
