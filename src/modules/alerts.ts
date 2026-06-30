@@ -1,21 +1,3 @@
-/**
- * Alert configuration and lifecycle management for CoralSwap protocol.
- *
- * This module provides an on-chain / off-chain alerting system that monitors
- * pool conditions, price deviations, liquidity thresholds, and other
- * configurable events. Alerts follow a defined lifecycle:
- *
- * ```text
- * CREATED → ACTIVE → FIRED → ACKNOWLEDGED → RESOLVED
- *                    PAUSED → ACTIVE
- *                    ARCHIVED
- * ```
- *
- * {@includeCode ./usage-examples.ts}
- *
- * @module alerts
- */
-
 import { CoralSwapClient } from '@/client';
 import {
   ValidationError,
@@ -29,23 +11,29 @@ import {
   AlertFrequency,
   AlertInstance,
   AlertSummary,
+  AlertConfigV2,
+  AlertStatusV2,
+  PriceAlertConfig,
+  ILAlertConfig,
+  HealthAlertConfig,
+  VolumeAlertConfig,
+  PriceAlert,
+  ILAlert,
+  HealthAlert,
+  VolumeAlert,
+  Alert,
 } from '@/types/alerts';
+import { InsufficientLiquidityError, InvalidThresholdError } from '@/errors';
+import {
+  validateAddress,
+  validateDistinctTokens,
+  validatePositiveAmount,
+} from '@/utils/validation';
 
-// ---------------------------------------------------------------------------
-// Additional local types
-// ---------------------------------------------------------------------------
+const PRICE_SCALE = 1_000_000_000_000_000_000n;
+const PRICE_SCALE_SQRT = 1_000_000_000n;
+const BPS = 10_000n;
 
-/**
- * Supported metric types for advanced alert conditions beyond the
- * built-in types defined in {@link AlertCondition}.
- *
- * - `reserve_ratio`     — Ratio of token reserves in a pool.
- * - `price_deviation`   — Deviation from a reference price (oracle / spot).
- * - `volume_anomaly`    — Trade volume outside expected range.
- * - `fee_accumulation`  — Accumulated fees in a pool.
- * - `lp_supply_change`  — Change in LP token total supply.
- * - `custom`            — User-defined metric evaluated off-chain.
- */
 export type AlertMetric =
   | 'reserve_ratio'
   | 'price_deviation'
@@ -54,170 +42,82 @@ export type AlertMetric =
   | 'lp_supply_change'
   | 'custom';
 
-/**
- * Comparison operator for alert thresholds.
- */
 export type AlertOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
 
-/**
- * Parameters for creating a new alert.
- */
 export interface CreateAlertParams {
-  /** Human-readable name. */
   name: string;
-  /** Optional description of what this alert monitors. */
   description?: string;
-  /** Severity level. */
   severity: AlertSeverity;
-  /** The condition type that triggers this alert. */
   condition: AlertCondition;
-  /** Numeric threshold that the evaluated metric must cross. */
   threshold: bigint;
-  /** Re-fire behaviour. Defaults to `'interval'` with a 15-minute cooldown. */
   frequency?: AlertFrequency;
-  /** Minimum seconds between consecutive firings when frequency is `'interval'`. */
   cooldownSeconds?: number;
-  /** Soroban contract addresses this alert monitors. */
   monitoredAddresses: string[];
-  /** Whether the alert is enabled immediately after creation. Defaults to `true`. */
   enabled?: boolean;
 }
 
-/**
- * Parameters for updating an existing alert.
- */
 export interface UpdateAlertParams {
-  /** New name (optional). */
   name?: string;
-  /** New description (optional). */
   description?: string;
-  /** New severity (optional). */
   severity?: AlertSeverity;
-  /** New condition type (optional). */
   condition?: AlertCondition;
-  /** New threshold (optional). */
   threshold?: bigint;
-  /** New frequency (optional). */
   frequency?: AlertFrequency;
-  /** New cooldown (optional). */
   cooldownSeconds?: number;
-  /** New monitored addresses (optional — replaces existing). */
   monitoredAddresses?: string[];
-  /** Merged metadata (optional — shallow merge). */
   metadata?: Record<string, string>;
 }
 
-/**
- * Event payload emitted when an alert fires.
- */
 export interface AlertEvent {
-  /** Alert instance identifier. */
   alertId: string;
-  /** Alert rule name. */
   name: string;
-  /** Severity at time of firing. */
   severity: AlertSeverity;
-  /** Condition that triggered. */
   condition: AlertCondition;
-  /** Actual metric value that crossed the threshold. */
   actualValue: bigint;
-  /** Target contract address being monitored. */
   targetAddress: string;
-  /** Ledger number at trigger time. */
   ledger: number;
-  /** ISO-8601 timestamp. */
   timestamp: string;
 }
 
-// ---------------------------------------------------------------------------
-// AlertModule
-// ---------------------------------------------------------------------------
+interface StoredGenericAlertV2 {
+  kind: 'generic';
+  id: string;
+  config: AlertConfigV2;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
 
-/**
- * Alert management module for CoralSwap protocol.
- *
- * Provides CRUD operations for alert rules, lifecycle transitions,
- * and event streaming for fired alerts.
- *
- * **Alert lifecycle**
- *
- * 1. {@link create} — Create a new alert rule.
- * 2. Automatically transitions to `active` status.
- * 3. When condition is met, alert transitions to `fired`.
- * 4. {@link acknowledge} — Operator acknowledges the event (status: `acknowledged`).
- * 5. {@link resolve} — Condition clears (status: `resolved`).
- * 6. {@link pause} / {@link resume} — Temporarily suspend or resume evaluation.
- * 7. {@link archive} — Permanently disable the rule.
- *
- * **Thresholds**
- *
- * | Condition           | Threshold example     | Meaning                       |
- * |---------------------|-----------------------|-------------------------------|
- * | `price_above`       | 150000000 (cents)     | Price above $1.50M (1500)     |
- * | `price_below`       | 50000000 (cents)      | Price below $500K             |
- * | `volume_above`      | 1000000000 (cents)    | 24h volume above $10M         |
- * | `liquidity_below`   | 50000000 (cents)      | TVL below $500K               |
- * | `gas_above`         | 10000000 (stroops)    | Resource fee above 10M stroops|
- * | `reserve_change`    | 500 (bps)             | Reserve change > 5%           |
- *
- * @example
- * ```ts
- * const alerts = new AlertModule(client);
- *
- * // Create an alert
- * const instance = await alerts.create({
- *   name: 'ETH/USDC Price Above $2000',
- *   severity: 'warning',
- *   condition: 'price_above',
- *   threshold: 200000000n,
- *   monitoredAddresses: ['CA3D...'],
- * });
- *
- * // Listen for firings
- * alerts.on('fired', (event) => {
- *   console.log(`Alert ${event.name} fired at ledger ${event.ledger}`);
- * });
- *
- * // Get summary
- * const summary = await alerts.getSummary();
- * ```
- */
+interface StoredPriceAlertV2 {
+  kind: 'price';
+  id: string;
+  config: PriceAlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+interface StoredILAlertV2 {
+  kind: 'il';
+  id: string;
+  config: ILAlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+type StoredAlertV2 = StoredGenericAlertV2 | StoredPriceAlertV2 | StoredILAlertV2;
+
 export class AlertModule {
   private client: CoralSwapClient;
   private listeners: Map<string, Array<(event: AlertEvent) => void>> = new Map();
   private rules: Map<string, AlertInstance> = new Map();
+  private alertsV2: Map<string, StoredAlertV2> = new Map();
 
   constructor(client: CoralSwapClient) {
     this.client = client;
   }
 
-  // -----------------------------------------------------------------------
-  // CRUD
-  // -----------------------------------------------------------------------
-
-  /**
-   * Create a new alert rule.
-   *
-   * The alert is created in `active` status and begins evaluating
-   * its condition immediately. {@link AlertEvent} emissions begin
-   * when the condition is met.
-   *
-   * @param params - Alert parameters (name, severity, condition, threshold, etc.).
-   * @returns The newly created {@link AlertInstance}.
-   * @throws {ValidationError} If `name` is empty, `monitoredAddresses` is empty,
-   *   or `threshold` is not positive.
-   *
-   * @example
-   * ```ts
-   * const alert = await module.create({
-   *   name: 'CORAL Price Spike',
-   *   severity: 'critical',
-   *   condition: 'price_above',
-   *   threshold: 100000000n,
-   *   monitoredAddresses: ['CA3D4E5F...'],
-   * });
-   * ```
-   */
   async create(params: CreateAlertParams): Promise<AlertInstance> {
     if (!params.name.trim()) {
       throw new ValidationError('Alert name must not be empty');
@@ -254,34 +154,10 @@ export class AlertModule {
     return instance;
   }
 
-  /**
-   * Retrieve an alert instance by its ID.
-   *
-   * @param id - Alert instance identifier.
-   * @returns The alert instance, or `null` if not found.
-   *
-   * @example
-   * ```ts
-   * const alert = await module.get('alert_abc123');
-   * if (alert) console.log(alert.config.name);
-   * ```
-   */
   async get(id: string): Promise<AlertInstance | null> {
     return this.rules.get(id) ?? null;
   }
 
-  /**
-   * List all alert instances, optionally filtered by status.
-   *
-   * @param status - Optional status filter.
-   * @returns Array of matching alert instances.
-   *
-   * @example
-   * ```ts
-   * const firedAlerts = await module.list('fired');
-   * console.log(`Fired alerts: ${firedAlerts.length}`);
-   * ```
-   */
   async list(status?: AlertStatus): Promise<AlertInstance[]> {
     const all = Array.from(this.rules.values());
     if (status) {
@@ -290,25 +166,6 @@ export class AlertModule {
     return all;
   }
 
-  /**
-   * Update an existing alert rule.
-   *
-   * Only the provided fields will be updated. If `monitoredAddresses`
-   * is supplied, the entire list is replaced.
-   *
-   * @param id - Alert instance identifier.
-   * @param params - Partial alert parameters to update.
-   * @returns The updated {@link AlertInstance}.
-   * @throws {CoralSwapSDKError} If the alert does not exist.
-   *
-   * @example
-   * ```ts
-   * await module.update('alert_abc', {
-   *   severity: 'critical',
-   *   threshold: 500000000n,
-   * });
-   * ```
-   */
   async update(id: string, params: UpdateAlertParams): Promise<AlertInstance> {
     const existing = this.rules.get(id);
     if (!existing) {
@@ -342,136 +199,32 @@ export class AlertModule {
     return updated;
   }
 
-  /**
-   * Delete an alert rule permanently.
-   *
-   * @param id - Alert instance identifier.
-   * @returns `true` if the alert was deleted, `false` if not found.
-   *
-   * @example
-   * ```ts
-   * await module.delete('alert_abc');
-   * ```
-   */
   async delete(id: string): Promise<boolean> {
     return this.rules.delete(id);
   }
 
-  // -----------------------------------------------------------------------
-  // Lifecycle transitions
-  // -----------------------------------------------------------------------
-
-  /**
-   * Acknowledge a fired alert.
-   *
-   * Transitions status from `fired` to `acknowledged`.
-   *
-   * @param id - Alert instance identifier.
-   * @returns The updated alert instance.
-   * @throws {CoralSwapSDKError} If the alert is not in `fired` status.
-   *
-   * @example
-   * ```ts
-   * await module.acknowledge('alert_abc');
-   * ```
-   */
   async acknowledge(id: string): Promise<AlertInstance> {
     return this.transitionStatus(id, 'acknowledged', ['fired']);
   }
 
-  /**
-   * Resolve a fired or acknowledged alert.
-   *
-   * Transitions status from `fired` or `acknowledged` to `resolved`.
-   *
-   * @param id - Alert instance identifier.
-   * @returns The updated alert instance.
-   * @throws {CoralSwapSDKError} If the alert is not in `fired` or `acknowledged` status.
-   *
-   * @example
-   * ```ts
-   * await module.resolve('alert_abc');
-   * ```
-   */
   async resolve(id: string): Promise<AlertInstance> {
     return this.transitionStatus(id, 'resolved', ['fired', 'acknowledged']);
   }
 
-  /**
-   * Pause evaluation of an alert.
-   *
-   * Transitions status to `paused`. No conditions are evaluated
-   * until {@link resume} is called.
-   *
-   * @param id - Alert instance identifier.
-   * @returns The updated alert instance.
-   * @throws {CoralSwapSDKError} If the alert is already paused or archived.
-   *
-   * @example
-   * ```ts
-   * await module.pause('alert_abc');
-   * ```
-   */
   async pause(id: string): Promise<AlertInstance> {
     return this.transitionStatus(id, 'paused', ['active', 'fired', 'acknowledged']);
   }
 
-  /**
-   * Resume evaluation of a paused alert.
-   *
-   * Transitions status from `paused` back to `active`.
-   *
-   * @param id - Alert instance identifier.
-   * @returns The updated alert instance.
-   * @throws {CoralSwapSDKError} If the alert is not in `paused` status.
-   *
-   * @example
-   * ```ts
-   * await module.resume('alert_abc');
-   * ```
-   */
   async resume(id: string): Promise<AlertInstance> {
     return this.transitionStatus(id, 'active', ['paused']);
   }
 
-  /**
-   * Archive an alert permanently.
-   *
-   * Once archived, the alert cannot be reactivated.
-   *
-   * @param id - Alert instance identifier.
-   * @returns The updated alert instance.
-   * @throws {CoralSwapSDKError} If the alert is already archived.
-   *
-   * @example
-   * ```ts
-   * await module.archive('alert_abc');
-   * ```
-   */
   async archive(id: string): Promise<AlertInstance> {
     return this.transitionStatus(id, 'archived', [
       'active', 'fired', 'acknowledged', 'resolved', 'paused',
     ]);
   }
 
-  // -----------------------------------------------------------------------
-  // Summary
-  // -----------------------------------------------------------------------
-
-  /**
-   * Return an aggregated summary of all alert rules.
-   *
-   * Includes total count, breakdown by severity, breakdown by status,
-   * and the number of alerts that fired in the last 24 hours.
-   *
-   * @returns {@link AlertSummary} with aggregated data.
-   *
-   * @example
-   * ```ts
-   * const summary = await module.getSummary();
-   * console.log(`Critical alerts: ${summary.bySeverity.critical}`);
-   * ```
-   */
   async getSummary(): Promise<AlertSummary> {
     const all = Array.from(this.rules.values());
     const now = Math.floor(Date.now() / 1000);
@@ -505,27 +258,6 @@ export class AlertModule {
     };
   }
 
-  // -----------------------------------------------------------------------
-  // Event subscription
-  // -----------------------------------------------------------------------
-
-  /**
-   * Register a callback for alert fire events.
-   *
-   * The callback receives an {@link AlertEvent} payload whenever an
-   * alert condition is met and the alert transitions to `fired`.
-   *
-   * @param event - Event name (only `'fired'` is supported).
-   * @param handler - Callback invoked with the alert event.
-   * @returns A function that unsubscribes the handler when called.
-   *
-   * @example
-   * ```ts
-   * const unsubscribe = module.on('fired', (event) => {
-   *   sendToDiscord(event);
-   * });
-   * ```
-   */
   on(event: 'fired', handler: (event: AlertEvent) => void): () => void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, []);
@@ -541,12 +273,6 @@ export class AlertModule {
     };
   }
 
-  /**
-   * Emit a fired event to all registered listeners.
-   *
-   * @internal
-   * @param event - The alert event payload.
-   */
   protected emit(event: AlertEvent): void {
     const handlers = this.listeners.get('fired');
     if (handlers) {
@@ -560,9 +286,385 @@ export class AlertModule {
     }
   }
 
-  // -----------------------------------------------------------------------
-  // Private helpers
-  // -----------------------------------------------------------------------
+  // V2 API methods
+
+  async createAlert(config: AlertConfigV2): Promise<string> {
+    this.validateAlertConfigV2(config);
+    const id = generateIdV2();
+    this.alertsV2.set(id, {
+      kind: 'generic',
+      id,
+      config,
+      target: config.target,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async createPriceAlert(config: PriceAlertConfig): Promise<string> {
+    this.validatePriceAlertConfig(config);
+    const id = generateIdV2();
+    this.alertsV2.set(id, {
+      kind: 'price',
+      id,
+      config,
+      target: config.pairAddress,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async createILAlert(config: ILAlertConfig): Promise<string> {
+    this.validateILAlertConfig(config);
+    const id = generateIdV2();
+    this.alertsV2.set(id, {
+      kind: 'il',
+      id,
+      config,
+      target: config.pairAddress,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async checkAlerts(address: string): Promise<Alert[]> {
+    const results: Alert[] = [];
+    const targetAlerts = Array.from(this.alertsV2.values())
+      .filter(a => a.target === address && a.triggeredAt === undefined);
+
+    for (const stored of targetAlerts) {
+      const alert = await this.checkStoredAlert(stored);
+      if (alert.triggered) {
+        stored.triggeredAt = Date.now();
+        results.push(alert);
+      }
+    }
+
+    return results;
+  }
+
+  deleteAlert(alertId: string): void {
+    if (!this.alertsV2.has(alertId)) {
+      throw new ValidationError(`Alert not found: ${alertId}`);
+    }
+    this.alertsV2.delete(alertId);
+  }
+
+  async checkPriceAlert(
+    config: PriceAlertConfig,
+    id: string,
+  ): Promise<PriceAlert> {
+    this.validatePriceAlertConfig(config);
+
+    const currentPrice = await this.getPoolPrice(
+      config.pairAddress,
+      config.tokenIn,
+      config.tokenOut,
+    );
+
+    const triggered = config.direction === 'above'
+      ? currentPrice >= config.thresholdPrice
+      : currentPrice <= config.thresholdPrice;
+    const status: AlertStatusV2 = triggered ? 'triggered' : 'active';
+
+    return { id, type: 'price', config, currentPrice, status, triggered };
+  }
+
+  async checkILAlert(
+    config: ILAlertConfig,
+    id: string,
+  ): Promise<ILAlert> {
+    this.validateILAlertConfig(config);
+
+    const pair = this.client.pair(config.pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+    const tokens = await pair.getTokens();
+
+    this.validatePairTokens(tokens, config.tokenA, config.tokenB);
+
+    const isAToken0 = tokens.token0 === config.tokenA;
+    const reserveA = isAToken0 ? reserve0 : reserve1;
+    const reserveB = isAToken0 ? reserve1 : reserve0;
+
+    if (reserveA === 0n || reserveB === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const currentPrice = (reserveB * PRICE_SCALE) / reserveA;
+    const priceRatio = this.computePriceRatio(currentPrice, config.referencePrice);
+    const currentILBps = this.computeImpermanentLossBps(priceRatio);
+
+    const triggered = currentILBps >= config.maxImpermanentLossBps;
+    const status: AlertStatusV2 = triggered ? 'triggered' : 'active';
+
+    return {
+      id,
+      type: 'il',
+      config,
+      currentILBps,
+      currentPrice,
+      status,
+      triggered,
+    };
+  }
+
+  async checkHealthAlert(
+    config: HealthAlertConfig,
+    id: string,
+  ): Promise<HealthAlert> {
+    validateAddress(config.pairAddress, 'pairAddress');
+
+    const pair = this.client.pair(config.pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const currentHealthScore = this.computeHealthScore(reserve0, reserve1);
+    const status: AlertStatusV2 = 'active';
+    const triggered = false;
+
+    return { id, type: 'health', config, currentHealthScore, status, triggered };
+  }
+
+  async checkVolumeAlert(
+    config: VolumeAlertConfig,
+    id: string,
+  ): Promise<VolumeAlert> {
+    validateAddress(config.pairAddress, 'pairAddress');
+
+    const pair = this.client.pair(config.pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const currentVolume = reserve0 + reserve1;
+    const status: AlertStatusV2 = 'active';
+    const triggered = false;
+
+    return { id, type: 'volume', config, currentVolume, status, triggered };
+  }
+
+  private async checkStoredAlert(stored: StoredAlertV2): Promise<Alert> {
+    switch (stored.kind) {
+      case 'price':
+        return this.checkPriceAlert(stored.config, stored.id);
+      case 'il':
+        return this.checkILAlert(stored.config, stored.id);
+      case 'generic':
+        return this.checkGenericStoredAlert(stored);
+    }
+  }
+
+  private async checkGenericStoredAlert(
+    stored: StoredGenericAlertV2,
+  ): Promise<Alert> {
+    switch (stored.config.type) {
+      case 'price':
+        return this.checkPriceFromStored(stored);
+      case 'il':
+        return this.checkILFromStored(stored);
+      case 'health':
+        return this.checkHealthFromStored(stored);
+      case 'volume':
+        return this.checkVolumeFromStored(stored);
+    }
+  }
+
+  private async checkPriceFromStored(
+    stored: StoredGenericAlertV2,
+  ): Promise<PriceAlert> {
+    const { target, threshold, direction } = stored.config;
+    const pair = this.client.pair(target);
+    const tokens = await pair.getTokens();
+
+    const priceConfig: PriceAlertConfig = {
+      tokenIn: tokens.token0,
+      tokenOut: tokens.token1,
+      pairAddress: target,
+      thresholdPrice: BigInt(Math.round(threshold * 1_000_000_000_000_000)) * 1000n,
+      direction,
+    };
+
+    return this.checkPriceAlert(priceConfig, stored.id);
+  }
+
+  private async checkILFromStored(stored: StoredGenericAlertV2): Promise<ILAlert> {
+    const { target, threshold } = stored.config;
+    const pair = this.client.pair(target);
+    const tokens = await pair.getTokens();
+
+    const { reserve0, reserve1 } = await pair.getReserves();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const referencePrice = (reserve1 * PRICE_SCALE) / reserve0;
+
+    const ilConfig: ILAlertConfig = {
+      tokenA: tokens.token0,
+      tokenB: tokens.token1,
+      pairAddress: target,
+      referencePrice,
+      maxImpermanentLossBps: Math.round(threshold),
+    };
+
+    return this.checkILAlert(ilConfig, stored.id);
+  }
+
+  private async checkHealthFromStored(
+    stored: StoredGenericAlertV2,
+  ): Promise<HealthAlert> {
+    const { target } = stored.config;
+    const config: HealthAlertConfig = { pairAddress: target };
+    return this.checkHealthAlert(config, stored.id);
+  }
+
+  private async checkVolumeFromStored(
+    stored: StoredGenericAlertV2,
+  ): Promise<VolumeAlert> {
+    const { target } = stored.config;
+    const config: VolumeAlertConfig = { pairAddress: target };
+    return this.checkVolumeAlert(config, stored.id);
+  }
+
+  private validateAlertConfigV2(config: AlertConfigV2): void {
+    validateAddress(config.target, 'target');
+
+    if (config.type === 'il') {
+      this.validateBps(config.threshold, 'threshold');
+    } else if (config.type === 'health') {
+      this.validateBps(config.threshold, 'threshold');
+    } else if (config.type === 'price') {
+      if (config.threshold <= 0) {
+        throw new InvalidThresholdError(config.type, config.threshold, 0, Infinity);
+      }
+    } else if (config.type === 'volume') {
+      if (config.threshold <= 0) {
+        throw new InvalidThresholdError(config.type, config.threshold, 0, Infinity);
+      }
+    }
+
+    this.validateDirection(config.direction);
+  }
+
+  private validatePriceAlertConfig(config: PriceAlertConfig): void {
+    validateAddress(config.tokenIn, 'tokenIn');
+    validateAddress(config.tokenOut, 'tokenOut');
+    validateAddress(config.pairAddress, 'pairAddress');
+    validateDistinctTokens(config.tokenIn, config.tokenOut);
+    validatePositiveAmount(config.thresholdPrice, 'thresholdPrice');
+    this.validateDirection(config.direction);
+  }
+
+  private validateILAlertConfig(config: ILAlertConfig): void {
+    validateAddress(config.tokenA, 'tokenA');
+    validateAddress(config.tokenB, 'tokenB');
+    validateAddress(config.pairAddress, 'pairAddress');
+    validateDistinctTokens(config.tokenA, config.tokenB);
+    validatePositiveAmount(config.referencePrice, 'referencePrice');
+    this.validateBps(config.maxImpermanentLossBps, 'maxImpermanentLossBps');
+  }
+
+  private async getPoolPrice(
+    pairAddress: string,
+    tokenIn: string,
+    tokenOut: string,
+  ): Promise<bigint> {
+    const pair = this.client.pair(pairAddress);
+    const { reserve0, reserve1 } = await pair.getReserves();
+    const tokens = await pair.getTokens();
+
+    if (reserve0 === 0n || reserve1 === 0n) {
+      throw new InsufficientLiquidityError('Pool has no liquidity');
+    }
+
+    const isTokenInToken0 = tokens.token0 === tokenIn;
+    this.validatePairTokens(tokens, tokenIn, tokenOut);
+
+    const reserveIn = isTokenInToken0 ? reserve0 : reserve1;
+    const reserveOut = isTokenInToken0 ? reserve1 : reserve0;
+
+    return (reserveOut * PRICE_SCALE) / reserveIn;
+  }
+
+  private computePriceRatio(
+    currentPrice: bigint,
+    referencePrice: bigint,
+  ): bigint {
+    return (currentPrice * PRICE_SCALE) / referencePrice;
+  }
+
+  private computeImpermanentLossBps(priceRatio: bigint): number {
+    if (priceRatio <= 0n) return 0;
+
+    const sqrtRatio = this.sqrt(priceRatio);
+    const numerator = 2n * sqrtRatio * PRICE_SCALE_SQRT * BPS;
+    const denominator = PRICE_SCALE + priceRatio;
+
+    if (denominator === 0n) return 0;
+
+    const poolFractionBps = numerator / denominator;
+    const lossBps = poolFractionBps >= BPS ? 0 : Number(BPS - poolFractionBps);
+    return lossBps;
+  }
+
+  private computeHealthScore(reserve0: bigint, reserve1: bigint): number {
+    if (reserve0 === 0n || reserve1 === 0n) return 0;
+
+    const smaller = reserve0 < reserve1 ? reserve0 : reserve1;
+    const larger = reserve0 < reserve1 ? reserve1 : reserve0;
+
+    return Number((smaller * BPS) / larger);
+  }
+
+  private validatePairTokens(
+    tokens: { token0: string; token1: string },
+    tokenA: string,
+    tokenB: string,
+  ): void {
+    const hasA = tokens.token0 === tokenA || tokens.token1 === tokenA;
+    const hasB = tokens.token0 === tokenB || tokens.token1 === tokenB;
+
+    if (!hasA || !hasB) {
+      throw new ValidationError('tokens do not match pair tokens', {
+        tokenA,
+        tokenB,
+        token0: tokens.token0,
+        token1: tokens.token1,
+      });
+    }
+  }
+
+  private validateDirection(direction: string): void {
+    if (direction !== 'above' && direction !== 'below') {
+      throw new ValidationError('direction must be above or below', { direction });
+    }
+  }
+
+  private validateBps(value: number, name: string): void {
+    if (!Number.isInteger(value) || value < 0 || value > Number(BPS)) {
+      throw new ValidationError(`${name} must be an integer between 0 and 10000`, {
+        [name]: value,
+      });
+    }
+  }
+
+  private sqrt(value: bigint): bigint {
+    if (value < 0n) return 0n;
+    if (value === 0n) return 0n;
+    let x = value;
+    let y = (x + 1n) / 2n;
+    while (y < x) {
+      x = y;
+      y = (x + value / x) / 2n;
+    }
+    return x;
+  }
 
   private generateId(): string {
     return `alert_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -606,4 +708,8 @@ export class AlertModule {
     this.rules.set(id, updated);
     return updated;
   }
+}
+
+function generateIdV2(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
