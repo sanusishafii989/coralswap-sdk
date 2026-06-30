@@ -65,6 +65,12 @@ export interface StopLossOrder {
    * is currently met and the order is eligible for execution.
    */
   triggered: boolean;
+  /**
+   * Distance percentage from current price to trigger price.
+   * Positive = safe (current > trigger), negative = breached (current <= trigger).
+   * Calculated as: ((currentPrice - triggerPrice) / triggerPrice) * 100
+   */
+  distancePercent: number;
 }
 
 /**
@@ -75,8 +81,8 @@ export interface StopLossOrderQuery {
   statuses?: StopLossStatus[];
   /** Restrict results to triggered or non-triggered orders. */
   triggered?: boolean;
-  /** Sort by creation time or trigger price. Defaults to `createdAt`. */
-  sortBy?: 'createdAt' | 'triggerPrice';
+  /** Sort by creation time, trigger price, or distance to trigger. Defaults to `createdAt`. */
+  sortBy?: 'createdAt' | 'triggerPrice' | 'distancePercent';
   /** Sort direction. Defaults to `desc`. */
   sortDirection?: 'asc' | 'desc';
 }

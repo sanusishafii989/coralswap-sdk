@@ -281,10 +281,17 @@ export class StopLossModule {
 
   private async enrichOrder(order: DecodedStopLossOrder): Promise<StopLossOrder> {
     const snapshot = await this.getOraclePrice(order.oracleAsset);
+    const distancePercent =
+      order.triggerPrice > 0n
+        ? Number(
+            ((snapshot.price - order.triggerPrice) * 100n) / order.triggerPrice
+          )
+        : 0;
     return {
       ...order,
       currentPrice: snapshot.price,
       triggered: snapshot.price <= order.triggerPrice,
+      distancePercent,
     };
   }
 
@@ -369,14 +376,19 @@ export class StopLossModule {
 
     const direction = sortDirection === 'asc' ? 1 : -1;
     filtered = [...filtered].sort((left, right) => {
-      const leftValue =
-        sortBy === 'triggerPrice'
-          ? left.triggerPrice
-          : BigInt(left.createdAt ?? 0);
-      const rightValue =
-        sortBy === 'triggerPrice'
-          ? right.triggerPrice
-          : BigInt(right.createdAt ?? 0);
+      let leftValue: bigint | number;
+      let rightValue: bigint | number;
+
+      if (sortBy === 'triggerPrice') {
+        leftValue = left.triggerPrice;
+        rightValue = right.triggerPrice;
+      } else if (sortBy === 'distancePercent') {
+        leftValue = left.distancePercent;
+        rightValue = right.distancePercent;
+      } else {
+        leftValue = BigInt(left.createdAt ?? 0);
+        rightValue = BigInt(right.createdAt ?? 0);
+      }
 
       if (leftValue === rightValue) return 0;
       return leftValue > rightValue ? direction : -direction;

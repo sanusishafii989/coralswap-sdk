@@ -469,4 +469,156 @@ describe('StopLossModule', () => {
       );
     });
   });
+
+  describe('distancePercent calculation', () => {
+    it('calculates positive distancePercent when price is above trigger', async () => {
+      jest.spyOn(client, 'simulateTransaction');
+      (client.simulateTransaction as jest.Mock).mockResolvedValueOnce(
+        makeSimResult(makeOrderNative())
+      );
+      (client.simulateTransaction as jest.Mock).mockResolvedValueOnce(
+        makeSimResult('12000000') // 33% above trigger of 9000000
+      );
+
+      const order = await stopLoss.getStopLoss('order-1');
+
+      expect(order.distancePercent).toBeGreaterThan(0);
+      expect(order.distancePercent).toBeCloseTo(33.33, 1);
+    });
+
+    it('calculates negative distancePercent when price is below trigger', async () => {
+      jest.spyOn(client, 'simulateTransaction');
+      (client.simulateTransaction as jest.Mock).mockResolvedValueOnce(
+        makeSimResult(makeOrderNative())
+      );
+      (client.simulateTransaction as jest.Mock).mockResolvedValueOnce(
+        makeSimResult('6000000') // 33% below trigger of 9000000
+      );
+
+      const order = await stopLoss.getStopLoss('order-1');
+
+      expect(order.distancePercent).toBeLessThan(0);
+      expect(order.distancePercent).toBeCloseTo(-33.33, 1);
+    });
+
+    it('calculates zero distancePercent when price equals trigger', async () => {
+      jest.spyOn(client, 'simulateTransaction');
+      (client.simulateTransaction as jest.Mock).mockResolvedValueOnce(
+        makeSimResult(makeOrderNative())
+      );
+      (client.simulateTransaction as jest.Mock).mockResolvedValueOnce(
+        makeSimResult('9000000') // Exactly at trigger
+      );
+
+      const order = await stopLoss.getStopLoss('order-1');
+
+      expect(order.distancePercent).toBeCloseTo(0, 1);
+    });
+  });
+
+  describe('getStopLossOrders() with distancePercent sorting', () => {
+    it('includes distancePercent in each order', async () => {
+      const order1 = makeOrderNative({ id: 'order-1', trigger_price: '9000000' });
+      const order2 = makeOrderNative({ id: 'order-2', trigger_price: '8000000' });
+
+      jest
+        .spyOn(client, 'simulateTransaction')
+        .mockResolvedValueOnce(
+          makeSimResult([order1, order2])
+        )
+        .mockResolvedValueOnce(makeSimResult('10000000'))
+        .mockResolvedValueOnce(makeSimResult('10000000'));
+
+      const orders = await stopLoss.getStopLossOrders(OWNER);
+
+      expect(orders.length).toBe(2);
+      for (const order of orders) {
+        expect(order.distancePercent).toBeDefined();
+        expect(typeof order.distancePercent).toBe('number');
+      }
+    });
+
+    it('sorts orders by distancePercent ascending (closest to trigger first)', async () => {
+      const order1 = makeOrderNative({
+        id: 'order-1',
+        trigger_price: '9000000',
+      });
+      const order2 = makeOrderNative({
+        id: 'order-2',
+        trigger_price: '7000000',
+      });
+
+      jest
+        .spyOn(client, 'simulateTransaction')
+        .mockResolvedValueOnce(
+          makeSimResult([order1, order2])
+        )
+        .mockResolvedValueOnce(makeSimResult('9100000'))
+        .mockResolvedValueOnce(makeSimResult('9100000'));
+
+      const orders = await stopLoss.getStopLossOrders(OWNER, {
+        sortBy: 'distancePercent',
+        sortDirection: 'asc',
+      });
+
+      expect(orders).toHaveLength(2);
+      expect(orders[0].distancePercent).toBeLessThanOrEqual(
+        orders[1].distancePercent
+      );
+    });
+
+    it('sorts orders by distancePercent descending', async () => {
+      const order1 = makeOrderNative({
+        id: 'order-1',
+        trigger_price: '9000000',
+      });
+      const order2 = makeOrderNative({
+        id: 'order-2',
+        trigger_price: '7000000',
+      });
+
+      jest
+        .spyOn(client, 'simulateTransaction')
+        .mockResolvedValueOnce(
+          makeSimResult([order1, order2])
+        )
+        .mockResolvedValueOnce(makeSimResult('9100000'))
+        .mockResolvedValueOnce(makeSimResult('9100000'));
+
+      const orders = await stopLoss.getStopLossOrders(OWNER, {
+        sortBy: 'distancePercent',
+        sortDirection: 'desc',
+      });
+
+      expect(orders).toHaveLength(2);
+      expect(orders[0].distancePercent).toBeGreaterThanOrEqual(
+        orders[1].distancePercent
+      );
+    });
+
+    it('default sorting still uses createdAt when sortBy is not specified', async () => {
+      const order1 = makeOrderNative({
+        id: 'order-1',
+        created_at: NOW_MS - 100_000,
+      });
+      const order2 = makeOrderNative({
+        id: 'order-2',
+        created_at: NOW_MS - 200_000,
+      });
+
+      jest
+        .spyOn(client, 'simulateTransaction')
+        .mockResolvedValueOnce(
+          makeSimResult([order1, order2])
+        )
+        .mockResolvedValueOnce(makeSimResult('10000000'))
+        .mockResolvedValueOnce(makeSimResult('10000000'));
+
+      const orders = await stopLoss.getStopLossOrders(OWNER);
+
+      expect(orders[0].createdAt).toBeGreaterThan(
+        orders[1].createdAt ?? 0
+      );
+    });
+  });
 });
