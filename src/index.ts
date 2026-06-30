@@ -66,6 +66,8 @@ export {
   FlashLoanModule,
   FeeModule,
   OracleModule,
+  PortfolioModule,
+  RiskMetricsModule,
   TokenListModule,
   RouterModule,
   TreasuryModule,
@@ -74,8 +76,16 @@ export {
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult } from "@/modules";
 export type { TreasuryModuleOptions, LeaderboardEntry, LeaderboardOptions } from "@/modules";
+  StopLossModule,
   AlertModule,
   LeaderboardModule,
+  PortfolioModule,
+  RiskMetricsModule,
+  StopLossModule,
+  WebhookModule,
+  TaxReportingModule,
+  RiskMetricsModule,
+  GovernanceModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult, TraderRanking, GetTopTradersOptions } from "@/modules";
@@ -161,5 +171,7 @@ export {
   FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
+  WebhookError,
+  WebhookDisabledError,
   mapError,
 } from "@/errors";

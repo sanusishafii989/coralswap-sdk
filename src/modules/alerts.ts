@@ -2,7 +2,6 @@ import { CoralSwapClient } from '@/client';
 import {
   Alert,
   AlertConfig,
-  AlertDirection,
   AlertStatus,
   PriceAlertConfig,
   ILAlertConfig,
@@ -13,7 +12,7 @@ import {
   HealthAlert,
   VolumeAlert,
 } from '@/types/alerts';
-import { ValidationError, InsufficientLiquidityError } from '@/errors';
+import { ValidationError, InsufficientLiquidityError, InvalidThresholdError } from '@/errors';
 import {
   validateAddress,
   validateDistinctTokens,
@@ -24,12 +23,34 @@ const PRICE_SCALE = 1_000_000_000_000_000_000n;
 const PRICE_SCALE_SQRT = 1_000_000_000n;
 const BPS = 10_000n;
 
-interface StoredAlert {
+interface StoredGenericAlert {
+  kind: 'generic';
   id: string;
   config: AlertConfig;
-  referencePrice?: bigint;
+  target: string;
+  triggeredAt?: number;
   createdAt: number;
 }
+
+interface StoredPriceAlert {
+  kind: 'price';
+  id: string;
+  config: PriceAlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+interface StoredILAlert {
+  kind: 'il';
+  id: string;
+  config: ILAlertConfig;
+  target: string;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+type StoredAlert = StoredGenericAlert | StoredPriceAlert | StoredILAlert;
 
 export class AlertModule {
   private client: CoralSwapClient;
@@ -42,18 +63,53 @@ export class AlertModule {
   async createAlert(config: AlertConfig): Promise<string> {
     this.validateAlertConfig(config);
     const id = generateId();
-    this.alerts.set(id, { id, config, createdAt: Date.now() });
+    this.alerts.set(id, {
+      kind: 'generic',
+      id,
+      config,
+      target: config.target,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async createPriceAlert(config: PriceAlertConfig): Promise<string> {
+    this.validatePriceAlertConfig(config);
+    const id = generateId();
+    this.alerts.set(id, {
+      kind: 'price',
+      id,
+      config,
+      target: config.pairAddress,
+      createdAt: Date.now(),
+    });
+    return id;
+  }
+
+  async createILAlert(config: ILAlertConfig): Promise<string> {
+    this.validateILAlertConfig(config);
+    const id = generateId();
+    this.alerts.set(id, {
+      kind: 'il',
+      id,
+      config,
+      target: config.pairAddress,
+      createdAt: Date.now(),
+    });
     return id;
   }
 
   async checkAlerts(address: string): Promise<Alert[]> {
     const results: Alert[] = [];
     const targetAlerts = Array.from(this.alerts.values())
-      .filter(a => a.config.target === address);
+      .filter(a => a.target === address && a.triggeredAt === undefined);
 
     for (const stored of targetAlerts) {
       const alert = await this.checkStoredAlert(stored);
-      results.push(alert);
+      if (alert.triggered) {
+        stored.triggeredAt = Date.now();
+        results.push(alert);
+      }
     }
 
     return results;
@@ -70,12 +126,7 @@ export class AlertModule {
     config: PriceAlertConfig,
     id: string,
   ): Promise<PriceAlert> {
-    validateAddress(config.tokenIn, 'tokenIn');
-    validateAddress(config.tokenOut, 'tokenOut');
-    validateAddress(config.pairAddress, 'pairAddress');
-    validateDistinctTokens(config.tokenIn, config.tokenOut);
-    validatePositiveAmount(config.thresholdPrice, 'thresholdPrice');
-    this.validateDirection(config.direction);
+    this.validatePriceAlertConfig(config);
 
     const currentPrice = await this.getPoolPrice(
       config.pairAddress,
@@ -95,12 +146,7 @@ export class AlertModule {
     config: ILAlertConfig,
     id: string,
   ): Promise<ILAlert> {
-    validateAddress(config.tokenA, 'tokenA');
-    validateAddress(config.tokenB, 'tokenB');
-    validateAddress(config.pairAddress, 'pairAddress');
-    validateDistinctTokens(config.tokenA, config.tokenB);
-    validatePositiveAmount(config.referencePrice, 'referencePrice');
-    this.validateBps(config.maxImpermanentLossBps, 'maxImpermanentLossBps');
+    this.validateILAlertConfig(config);
 
     const pair = this.client.pair(config.pairAddress);
     const { reserve0, reserve1 } = await pair.getReserves();
@@ -175,6 +221,19 @@ export class AlertModule {
   }
 
   private async checkStoredAlert(stored: StoredAlert): Promise<Alert> {
+    switch (stored.kind) {
+      case 'price':
+        return this.checkPriceAlert(stored.config, stored.id);
+      case 'il':
+        return this.checkILAlert(stored.config, stored.id);
+      case 'generic':
+        return this.checkGenericStoredAlert(stored);
+    }
+  }
+
+  private async checkGenericStoredAlert(
+    stored: StoredGenericAlert,
+  ): Promise<Alert> {
     switch (stored.config.type) {
       case 'price':
         return this.checkPriceFromStored(stored);
@@ -187,7 +246,9 @@ export class AlertModule {
     }
   }
 
-  private async checkPriceFromStored(stored: StoredAlert): Promise<PriceAlert> {
+  private async checkPriceFromStored(
+    stored: StoredGenericAlert,
+  ): Promise<PriceAlert> {
     const { target, threshold, direction } = stored.config;
     const pair = this.client.pair(target);
     const tokens = await pair.getTokens();
@@ -203,7 +264,7 @@ export class AlertModule {
     return this.checkPriceAlert(priceConfig, stored.id);
   }
 
-  private async checkILFromStored(stored: StoredAlert): Promise<ILAlert> {
+  private async checkILFromStored(stored: StoredGenericAlert): Promise<ILAlert> {
     const { target, threshold } = stored.config;
     const pair = this.client.pair(target);
     const tokens = await pair.getTokens();
@@ -227,13 +288,17 @@ export class AlertModule {
     return this.checkILAlert(ilConfig, stored.id);
   }
 
-  private async checkHealthFromStored(stored: StoredAlert): Promise<HealthAlert> {
+  private async checkHealthFromStored(
+    stored: StoredGenericAlert,
+  ): Promise<HealthAlert> {
     const { target } = stored.config;
     const config: HealthAlertConfig = { pairAddress: target };
     return this.checkHealthAlert(config, stored.id);
   }
 
-  private async checkVolumeFromStored(stored: StoredAlert): Promise<VolumeAlert> {
+  private async checkVolumeFromStored(
+    stored: StoredGenericAlert,
+  ): Promise<VolumeAlert> {
     const { target } = stored.config;
     const config: VolumeAlertConfig = { pairAddress: target };
     return this.checkVolumeAlert(config, stored.id);
@@ -248,19 +313,33 @@ export class AlertModule {
       this.validateBps(config.threshold, 'threshold');
     } else if (config.type === 'price') {
       if (config.threshold <= 0) {
-        throw new ValidationError('price threshold must be positive', {
-          threshold: config.threshold,
-        });
+        throw new InvalidThresholdError(config.type, config.threshold, 0, Infinity);
       }
     } else if (config.type === 'volume') {
       if (config.threshold <= 0) {
-        throw new ValidationError('volume threshold must be positive', {
-          threshold: config.threshold,
-        });
+        throw new InvalidThresholdError(config.type, config.threshold, 0, Infinity);
       }
     }
 
     this.validateDirection(config.direction);
+  }
+
+  private validatePriceAlertConfig(config: PriceAlertConfig): void {
+    validateAddress(config.tokenIn, 'tokenIn');
+    validateAddress(config.tokenOut, 'tokenOut');
+    validateAddress(config.pairAddress, 'pairAddress');
+    validateDistinctTokens(config.tokenIn, config.tokenOut);
+    validatePositiveAmount(config.thresholdPrice, 'thresholdPrice');
+    this.validateDirection(config.direction);
+  }
+
+  private validateILAlertConfig(config: ILAlertConfig): void {
+    validateAddress(config.tokenA, 'tokenA');
+    validateAddress(config.tokenB, 'tokenB');
+    validateAddress(config.pairAddress, 'pairAddress');
+    validateDistinctTokens(config.tokenA, config.tokenB);
+    validatePositiveAmount(config.referencePrice, 'referencePrice');
+    this.validateBps(config.maxImpermanentLossBps, 'maxImpermanentLossBps');
   }
 
   private async getPoolPrice(
