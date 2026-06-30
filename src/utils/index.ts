@@ -60,18 +60,6 @@ export {
   isValidPath,
 } from './validation';
 
-export {
-  batchRequest,
-  batchRequestOrThrow,
-  batchCall,
-  batchCallSequential,
-  DEFAULT_BATCH_CONCURRENCY,
-} from './batch-request';
-export type { BatchRequestOptions, BatchResult } from './batch-request';
-
-export { parseChangelog } from './changelog';
-export { RateLimiter } from './rate-limiter';
-export type { RateLimiterOptions } from './rate-limiter';
 export { estimateGas } from './gas';
 export type { SimulateFn } from './gas';
 
