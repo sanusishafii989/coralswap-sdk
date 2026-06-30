@@ -9,7 +9,6 @@
  */
 
 import { CoralSwapClient } from '@/client';
-import { CoralSwapSDKError } from '@/errors';
 import {
   MetricConfig,
   MetricInstance,
@@ -163,7 +162,7 @@ export class MonitoringModule {
   async getPoolHealth(pairAddress: string): Promise<PoolHealth> {
     try {
       const pair = this.client.pair(pairAddress);
-      const [reserves, tokens] = await Promise.all([
+      const [reserves] = await Promise.all([
         pair.getReserves(),
         pair.getTokens(),
       ]);

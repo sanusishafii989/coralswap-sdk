@@ -74,7 +74,6 @@ export {
   TreasuryModule,
   AlertsModule,
   AlertModule,
-  WebhooksModule,
   WebhookModule,
   MonitoringModule,
   StopLossModule,

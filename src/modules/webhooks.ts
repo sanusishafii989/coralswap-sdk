@@ -5,11 +5,6 @@ import {
   WebhookDelivery,
   WebhookDeliveryStatus,
   WebhookEndpointHealth,
-  WebhookConfigV2,
-  WebhookConfigLegacy,
-  WebhookDeliveryLegacy,
-  WebhookDeliveryStatusLegacy,
-  WebhookEndpointHealthLegacy,
   StoredWebhook,
   WebhookDeliveryResult,
   WebhookEnvelope,
@@ -32,7 +27,6 @@ import { ValidationError, WebhookDisabledError, WebhookError } from '@/errors';
 import type { Logger } from '@/types/common';
 
 const MAX_ENDPOINTS = 20;
-const RETRY_BACKOFFS = [30_000, 120_000, 600_000];
 const MAX_PAYLOAD_BYTES = 262_144;
 
 interface LoggerProvider {
@@ -508,7 +502,6 @@ export class WebhookModule {
     body: string,
     delivery: WebhookDelivery,
   ): Promise<void> {
-    const startTime = Date.now();
     this.updateDeliveryStatus(delivery.id, 'delivering');
 
     try {
@@ -569,8 +562,8 @@ export class WebhookModule {
   }
 
   private async scheduleRetry(
-    deliveryId: string,
-    attempt: number,
+    _deliveryId: string,
+    _attempt: number,
   ): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
