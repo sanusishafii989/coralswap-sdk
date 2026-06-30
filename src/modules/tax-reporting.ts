@@ -300,10 +300,6 @@ export class TaxReportingModule {
         const disposalQty = BigInt(
           Math.floor(parseFloat(row.amountIn) * 10_000_000)
         );
-        const salePrice = (
-          BigInt(Math.floor(parseFloat(row.amountOut) * 10_000_000)) /
-          disposalQty
-        ).toString();
 
         const orderedPurchases = method === "FIFO" ? purchases : [...purchases].reverse();
         let remainingDisposal = disposalQty;
