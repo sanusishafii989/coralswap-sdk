@@ -66,12 +66,20 @@ export {
   FlashLoanModule,
   FeeModule,
   OracleModule,
+  PortfolioModule,
+  RiskMetricsModule,
   TokenListModule,
+  FactoryModule,
   RouterModule,
   TreasuryModule,
-  PortfolioModule,
+  AlertsModule,
   AlertModule,
+  WebhookModule,
+  MonitoringModule,
+  StopLossModule,
   LeaderboardModule,
+  TaxReportingModule,
+  GovernanceModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult, TraderRanking, GetTopTradersOptions } from "@/modules";
@@ -159,5 +167,7 @@ export {
   MissingPriceFeedError,
   AddressNotFoundError,
   PortfolioCalculationError,
+  WebhookError,
+  WebhookDisabledError,
   mapError,
 } from "@/errors";
