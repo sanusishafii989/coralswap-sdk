@@ -1,7 +1,7 @@
 
 import { CoralSwapClient } from '../src/client';
 import { GovernanceModule } from '../src/modules/governance';
-import { ValidationError, PairNotFoundError, TransactionError } from '../src/errors';
+import { ValidationError, InvalidOperationError, TransactionError } from '../src/errors';
 import { Network } from '../src/types/common';
 import type { Proposal, DelegationState, ProposalAction } from '../src/types/governance';
 import type { SimulateTransactionResult } from '../src/types/common';
@@ -265,12 +265,12 @@ describe('GovernanceModule', () => {
       await expect(governance.getProposal('')).rejects.toThrow(ValidationError);
     });
 
-    it('throws PairNotFoundError when the simulation returns no value', async () => {
+    it('throws InvalidOperationError when the simulation returns no value', async () => {
       jest
         .spyOn(client, 'simulateTransaction')
         .mockResolvedValue(makeSimResult(null, false) as never);
 
-      await expect(governance.getProposal('nonexistent')).rejects.toThrow(PairNotFoundError);
+      await expect(governance.getProposal('nonexistent')).rejects.toThrow(InvalidOperationError);
     });
 
     it('decodes executedAt when present in the contract response', async () => {

@@ -25,6 +25,16 @@ export class CoralSwapSDKError extends Error {
     this.details = details;
     Object.setPrototypeOf(this, new.target.prototype);
   }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      details: this.details,
+      stack: this.stack,
+    };
+  }
 }
 
 /**

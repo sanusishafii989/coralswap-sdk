@@ -10,7 +10,7 @@ import {
 import { Signer } from '@/types/common';
 import {
   ValidationError,
-  PairNotFoundError,
+  InvalidOperationError,
   TransactionError,
 } from '@/errors';
 import { validateAddress } from '@/utils/validation';
@@ -59,13 +59,22 @@ export class GovernanceModule {
     signer: Signer,
   ): Promise<string> {
     if (!title || title.trim().length === 0) {
-      throw new ValidationError('title must not be empty');
+      throw new ValidationError('title must not be empty', {
+        operation: 'createProposal',
+        title,
+      });
     }
     if (!description || description.trim().length === 0) {
-      throw new ValidationError('description must not be empty');
+      throw new ValidationError('description must not be empty', {
+        operation: 'createProposal',
+        description,
+      });
     }
     if (!Array.isArray(actions) || actions.length === 0) {
-      throw new ValidationError('actions must be a non-empty array');
+      throw new ValidationError('actions must be a non-empty array', {
+        operation: 'createProposal',
+        actions,
+      });
     }
     for (const action of actions) {
       validateAddress(action.contractAddress, 'action.contractAddress');
@@ -96,6 +105,7 @@ export class GovernanceModule {
       throw new TransactionError(
         `createProposal failed: ${result.error?.message ?? 'Unknown error'}`,
         result.txHash,
+        { operation: 'createProposal', title, description },
       );
     }
 
@@ -122,12 +132,15 @@ export class GovernanceModule {
     signer: Signer,
   ): Promise<string> {
     if (!proposalId || proposalId.trim().length === 0) {
-      throw new ValidationError('proposalId must not be empty');
+      throw new ValidationError('proposalId must not be empty', {
+        operation: 'castVote',
+        proposalId,
+      });
     }
     if (!['for', 'against', 'abstain'].includes(voteType)) {
       throw new ValidationError(
         `voteType must be 'for', 'against', or 'abstain', got: ${voteType}`,
-        { voteType },
+        { operation: 'castVote', proposalId, voteType },
       );
     }
 
@@ -147,6 +160,7 @@ export class GovernanceModule {
       throw new TransactionError(
         `castVote failed: ${result.error?.message ?? 'Unknown error'}`,
         result.txHash,
+        { operation: 'castVote', proposalId, voteType },
       );
     }
 
@@ -168,7 +182,10 @@ export class GovernanceModule {
     const signerPublicKey = await signer.publicKey();
 
     if (toAddress === signerPublicKey) {
-      throw new ValidationError('Cannot delegate to self', { toAddress });
+      throw new ValidationError('Cannot delegate to self', {
+        operation: 'delegate',
+        delegateAddress: toAddress,
+      });
     }
 
     const contract = new Contract(this.contractAddress);
@@ -184,6 +201,7 @@ export class GovernanceModule {
       throw new TransactionError(
         `delegate failed: ${result.error?.message ?? 'Unknown error'}`,
         result.txHash,
+        { operation: 'delegate', delegateAddress: toAddress },
       );
     }
 
@@ -212,6 +230,7 @@ export class GovernanceModule {
       throw new TransactionError(
         `undelegate failed: ${result.error?.message ?? 'Unknown error'}`,
         result.txHash,
+        { operation: 'undelegate' },
       );
     }
 
@@ -228,11 +247,14 @@ export class GovernanceModule {
    * @param proposalId - Unique proposal identifier
    * @returns Full proposal state including vote tallies
    * @throws {ValidationError} If `proposalId` is empty
-   * @throws {PairNotFoundError} If no proposal exists for the given ID
+   * @throws {InvalidOperationError} If no proposal exists for the given ID
    */
   async getProposal(proposalId: string): Promise<Proposal> {
     if (!proposalId || proposalId.trim().length === 0) {
-      throw new ValidationError('proposalId must not be empty');
+      throw new ValidationError('proposalId must not be empty', {
+        operation: 'getProposal',
+        proposalId,
+      });
     }
 
     const contract = new Contract(this.contractAddress);
@@ -244,7 +266,10 @@ export class GovernanceModule {
     const sim = await this.client.simulateTransaction([op], {});
 
     if (!sim.success || !sim.returnValue) {
-      throw new PairNotFoundError(proposalId, 'governance');
+      throw new InvalidOperationError('Proposal not found', {
+        operation: 'getProposal',
+        proposalId,
+      });
     }
 
     return this.decodeProposal(sim.returnValue);
