@@ -84,3 +84,12 @@ export type { VotingPower, VotingPowerQueryProvider, VotingPowerQueryResult } fr
 export { checkCompatibility } from './migration';
 export type { BreakingChange, CompatibilityReport } from './migration';
 export { suppressDeprecationWarnings, deprecated } from './deprecation-warnings';
+
+export {
+  batchCall,
+  batchCallSequential,
+  batchRequest,
+  batchRequestOrThrow,
+  DEFAULT_BATCH_CONCURRENCY,
+} from './batch-request';
+export type { BatchRequestOptions, BatchResult } from './batch-request';

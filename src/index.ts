@@ -74,12 +74,8 @@ export {
   StopLossModule,
   AlertModule,
   LeaderboardModule,
-  PortfolioModule,
-  RiskMetricsModule,
-  StopLossModule,
   WebhookModule,
   TaxReportingModule,
-  RiskMetricsModule,
   GovernanceModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
