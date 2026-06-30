@@ -286,6 +286,22 @@ export class CooldownError extends CoralSwapSDKError {
 }
 
 /**
+ * Webhook delivery or registration errors.
+ *
+ * Raised for programmer mistakes during registration or dispatch
+ * (invalid webhook id, unsupported URL scheme, etc.). Endpoints that
+ * simply fail to acknowledge a delivery return a
+ * {@link WebhookDeliveryResult} with `delivered: false` rather than
+ * throwing this error.
+ */
+export class WebhookError extends CoralSwapSDKError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super("WEBHOOK_ERROR", message, details);
+    this.name = "WebhookError";
+  }
+}
+
+/**
  * Extract pair address from error details or message.
  */
 function extractPairAddress(err: unknown): string {

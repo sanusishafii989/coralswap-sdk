@@ -69,9 +69,13 @@ export {
   TokenListModule,
   RouterModule,
   TreasuryModule,
+  StopLossModule,
+  AlertModule,
+  LeaderboardModule,
+  WebhookModule,
 } from "@/modules";
 export type { OptimalPath } from "@/modules/router";
-export type { TWAPObservation, TWAPResult } from "@/modules";
+export type { TWAPObservation, TWAPResult, TraderRanking, GetTopTradersOptions } from "@/modules";
 export type { TreasuryModuleOptions } from "@/modules";
 
 // Utilities
@@ -118,6 +122,11 @@ export {
   EVENT_TOPICS,
   decodeEvents,
   decodeEventsFromXdr,
+  batchCall,
+  batchCallSequential,
+  batchRequest,
+  batchRequestOrThrow,
+  DEFAULT_BATCH_CONCURRENCY,
 } from './utils';
 
 
@@ -128,6 +137,8 @@ export type {
   WaitNextLedgerOptions,
   DecodeEventsOptions,
   SimulateFn,
+  BatchRequestOptions,
+  BatchResult,
 } from "./utils";
 
 // Errors
@@ -146,5 +157,6 @@ export {
   FlashLoanFailedError,
   CircuitBreakerError,
   SignerError,
+  WebhookError,
   mapError,
 } from "@/errors";

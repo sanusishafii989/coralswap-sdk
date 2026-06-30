@@ -216,62 +216,64 @@ export class TaxReportingModule {
 // ---------------------------------------------------------------------------
 
 interface RawEvent {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  value: any;
+  value: unknown;
   topic?: string[];
   txHash?: string;
   ledgerClosedAt?: string | number;
   ledger?: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function decodeMapEvent(value: any): Map<string, any> | null {
+function decodeMapEvent(value: unknown): Map<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  const valObj = value as Record<string, unknown>;
   const entries: unknown[] =
-    typeof value?.map === "function" ? value.map() : value?._value;
+    typeof valObj.map === "function" ? (valObj.map as () => unknown[])() : (valObj._value as unknown[]);
   if (!Array.isArray(entries)) return null;
 
   const map = new Map<string, unknown>();
-  for (const entry of entries as Array<{ key: unknown; val: unknown }>) {
-    const k = entry.key as Record<string, () => { toString(): string }>;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const entryObj = entry as { key: unknown; val: unknown };
+    const k = entryObj.key as Record<string, () => { toString(): string }>;
     let key: string | undefined;
     try {
       key = k.sym?.().toString() ?? k.str?.().toString();
     } catch { /* skip */ }
-    if (key) map.set(key, entry.val);
+    if (key) map.set(key, entryObj.val);
   }
-  return map as Map<string, unknown>;
+  return map;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function readAddress(map: Map<string, any>, key: string): string | undefined {
+function readAddress(map: Map<string, unknown>, key: string): string | undefined {
   const val = map.get(key);
-  if (!val) return undefined;
+  if (!val || typeof val !== "object") return undefined;
+  const valObj = val as Record<string, unknown>;
   try {
-    if (typeof val.address === "function") return val.address().toString();
-    if (typeof val._value?.toString === "function") return val._value.toString();
+    if (typeof valObj.address === "function") return (valObj.address as () => { toString(): string })().toString();
+    if (typeof valObj._value?.toString === "function") return (valObj._value as { toString(): string }).toString();
   } catch { /* skip */ }
   return undefined;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function readI128(map: Map<string, any>, key: string): bigint | undefined {
+function readI128(map: Map<string, unknown>, key: string): bigint | undefined {
   const val = map.get(key);
-  if (!val) return undefined;
+  if (!val || typeof val !== "object") return undefined;
+  const valObj = val as Record<string, unknown>;
   try {
-    if (typeof val.i128 === "function") {
-      const parts = val.i128();
+    if (typeof valObj.i128 === "function") {
+      const parts = (valObj.i128 as () => { hi(): { toString(): string }; lo(): { toString(): string } })();
       return (BigInt(parts.hi().toString()) << 64n) + BigInt(parts.lo().toString());
     }
   } catch { /* skip */ }
   return undefined;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function readU32(map: Map<string, any>, key: string): number | undefined {
+function readU32(map: Map<string, unknown>, key: string): number | undefined {
   const val = map.get(key);
-  if (!val) return undefined;
+  if (!val || typeof val !== "object") return undefined;
+  const valObj = val as Record<string, unknown>;
   try {
-    if (typeof val.u32 === "function") return val.u32();
+    if (typeof valObj.u32 === "function") return (valObj.u32 as () => number)();
   } catch { /* skip */ }
   return undefined;
 }
