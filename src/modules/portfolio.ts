@@ -39,6 +39,13 @@ export class PortfolioModule extends TreasuryModule {
     owner: string,
     options: GetPortfolioOptions = {},
   ): Promise<Portfolio> {
+    return this.get(owner, options);
+  }
+
+  async get(
+    owner: string,
+    options: GetPortfolioOptions = {},
+  ): Promise<Portfolio> {
     validateAddress(owner, "owner");
 
     const summary = await this.positions.getPositions(owner, {
