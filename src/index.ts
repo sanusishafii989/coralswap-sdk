@@ -72,6 +72,11 @@ export {
   FactoryModule,
   RouterModule,
   TreasuryModule,
+  LeaderboardModule,
+} from "@/modules";
+export type { OptimalPath } from "@/modules/router";
+export type { TWAPObservation, TWAPResult } from "@/modules";
+export type { TreasuryModuleOptions, LeaderboardEntry, LeaderboardOptions } from "@/modules";
   AlertsModule,
   AlertModule,
   WebhookModule,
@@ -84,6 +89,7 @@ export {
 export type { OptimalPath } from "@/modules/router";
 export type { TWAPObservation, TWAPResult, TraderRanking, GetTopTradersOptions } from "@/modules";
 export type { TreasuryModuleOptions } from "@/modules";
+
 
 // Utilities
 export {
