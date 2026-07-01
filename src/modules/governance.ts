@@ -13,7 +13,11 @@ import {
   InvalidOperationError,
   TransactionError,
 } from '@/errors';
-import { validateAddress } from '@/utils/validation';
+import {
+  validateAddress,
+  validateStringLength,
+  validateEnumValue,
+} from '@/utils/validation';
 import {
   Contract,
   nativeToScVal,
@@ -140,22 +144,13 @@ export class GovernanceModule {
     actions: ProposalAction[],
     signer: Signer,
   ): Promise<string> {
-    if (!title || title.trim().length === 0) {
-      throw new ValidationError('title must not be empty', {
-        operation: 'createProposal',
-        title,
-      });
-    }
-    if (!description || description.trim().length === 0) {
-      throw new ValidationError('description must not be empty', {
-        operation: 'createProposal',
-        description,
-      });
-    }
+    validateStringLength(title, 'title', 1, 200);
+    validateStringLength(description, 'description', 1, 5000);
     if (!Array.isArray(actions) || actions.length === 0) {
       throw new ValidationError('actions must be a non-empty array', {
+        field: 'actions',
+        constraint: 'non-empty array',
         operation: 'createProposal',
-        actions,
       });
     }
     for (const action of actions) {
@@ -225,15 +220,28 @@ export class GovernanceModule {
   ): Promise<string> {
     if (!proposalId || proposalId.trim().length === 0) {
       throw new ValidationError('proposalId must not be empty', {
+        field: 'proposalId',
+        constraint: 'non-empty string',
         operation: 'castVote',
-        proposalId,
       });
     }
-    if (!['for', 'against', 'abstain'].includes(voteType)) {
-      throw new ValidationError(
-        `voteType must be 'for', 'against', or 'abstain', got: ${voteType}`,
-        { operation: 'castVote', proposalId, voteType },
-      );
+    validateEnumValue(voteType, 'voteType', ['for', 'against', 'abstain']);
+
+    try {
+      await this.getProposal(proposalId);
+    } catch (err) {
+      if (err instanceof InvalidOperationError) {
+        throw new ValidationError(
+          `proposalId does not reference an existing proposal: ${proposalId}`,
+          {
+            field: 'proposalId',
+            constraint: 'existing proposal',
+            proposalId,
+            operation: 'castVote',
+          },
+        );
+      }
+      throw err;
     }
 
     const signerPublicKey = await signer.publicKey();
@@ -292,8 +300,10 @@ export class GovernanceModule {
 
     if (toAddress === signerPublicKey) {
       throw new ValidationError('Cannot delegate to self', {
-        operation: 'delegate',
+        field: 'toAddress',
+        constraint: 'must differ from signer public key',
         delegateAddress: toAddress,
+        operation: 'delegate',
       });
     }
 
@@ -387,8 +397,9 @@ export class GovernanceModule {
   async getProposal(proposalId: string): Promise<Proposal> {
     if (!proposalId || proposalId.trim().length === 0) {
       throw new ValidationError('proposalId must not be empty', {
+        field: 'proposalId',
+        constraint: 'non-empty string',
         operation: 'getProposal',
-        proposalId,
       });
     }
 
@@ -472,6 +483,30 @@ export class GovernanceModule {
    * ```
    */
   async getProposalHistory(filter?: ProposalFilter): Promise<Proposal[]> {
+    if (filter?.limit !== undefined) {
+      if (!Number.isInteger(filter.limit) || filter.limit < 1 || filter.limit > 1000) {
+        throw new ValidationError('filter.limit must be an integer between 1 and 1000', {
+          field: 'filter.limit',
+          constraint: 'integer 1-1000',
+          actual: filter.limit,
+          operation: 'getProposalHistory',
+        });
+      }
+    }
+    if (filter?.fromLedger !== undefined) {
+      if (!Number.isInteger(filter.fromLedger) || filter.fromLedger < 0) {
+        throw new ValidationError('filter.fromLedger must be a non-negative integer', {
+          field: 'filter.fromLedger',
+          constraint: 'non-negative integer',
+          actual: filter.fromLedger,
+          operation: 'getProposalHistory',
+        });
+      }
+    }
+    if (filter?.status !== undefined) {
+      validateEnumValue(filter.status, 'filter.status', ['passed', 'rejected', 'expired']);
+    }
+
     const contract = new Contract(this.contractAddress);
 
     const statusArg = filter?.status
