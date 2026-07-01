@@ -7,6 +7,14 @@ export { PortfolioModule } from './portfolio';
 export { RiskMetricsModule } from './risk-metrics';
 export { TokenListModule } from './tokens';
 export { FactoryModule } from './factory';
+export {
+  HealthCheckModule,
+  checkRPCHealth,
+  percentile,
+  getRPCLatency,
+  getContractStatus,
+  getBestEndpoint,
+} from './health-check';
 export { RouterModule } from './router';
 export { TreasuryModule } from './treasury';
 export { StopLossModule } from './stop-loss';

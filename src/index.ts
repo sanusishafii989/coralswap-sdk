@@ -83,6 +83,7 @@ export type { TreasuryModuleOptions, LeaderboardEntry, LeaderboardOptions } from
   MonitoringModule,
   StopLossModule,
   LeaderboardModule,
+  HealthCheckModule,
   TaxReportingModule,
   GovernanceModule,
 } from "@/modules";
